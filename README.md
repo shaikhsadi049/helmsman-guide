@@ -5,7 +5,7 @@ MetaTrader 4 and MetaTrader 5.
 
 - **Read it online:** open `index.html` — everything (all screenshots) is inside
   that single file.
-- **Download it:** [HelmsmanUserGuide.pdf](HelmsmanUserGuide.pdf) — 46 pages,
+- **Download it:** [HelmsmanUserGuide.pdf](HelmsmanUserGuide.pdf) — 64 pages,
   for offline reading and printing.
 
 Helmsman is free, with no activation and no account limit. Bug reports and
