@@ -12,10 +12,14 @@ create extension if not exists btree_gist; -- uuid + daterange একসাথ�
 --   core   : টেন্যান্ট, খামার কাঠামো, ব্যবহারকারী, অডিট মেশিনারি
 --   master : মাস্টার ডেটা (প্রজাতি, জাত, একক, রোগ) — গ্লোবাল + টেন্যান্ট
 --   prod   : উৎপাদন (ইউনিট, চলাচল, দৈনিক লগ)
+--   inv    : গুদাম ও স্টক
+--   feed   : রেশন ফরমুলেশন
 -- ---------------------------------------------------------------------
 create schema if not exists core;
 create schema if not exists master;
 create schema if not exists prod;
+create schema if not exists inv;
+create schema if not exists feed;
 
 -- ---------------------------------------------------------------------
 -- অ্যাপ্লিকেশন ভূমিকা।
@@ -33,4 +37,4 @@ begin
   end if;
 end $$;
 
-grant usage on schema core, master, prod to farmerp_app, farmerp_readonly;
+grant usage on schema core, master, prod, inv, feed to farmerp_app, farmerp_readonly;

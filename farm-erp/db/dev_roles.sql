@@ -39,11 +39,11 @@ alter role farmerp_dev_ro password :'app_password';
 -- ভবিষ্যতে বানানো টেবিলেও অনুমতি যেন স্বয়ংক্রিয়ভাবে যায়।
 -- (ss_apply() প্রতিটা টেবিলে গ্রান্ট দেয়, কিন্তু কেউ ss_apply ছাড়া
 --  টেবিল বানালে 99_verify ধরবে — এটা অতিরিক্ত জাল।)
-alter default privileges in schema core, master, prod
+alter default privileges in schema core, master, prod, inv, feed
   grant select, insert, update, delete on tables to farmerp_app;
-alter default privileges in schema core, master, prod
+alter default privileges in schema core, master, prod, inv, feed
   grant select on tables to farmerp_readonly;
-alter default privileges in schema core, master, prod
+alter default privileges in schema core, master, prod, inv, feed
   grant usage, select on sequences to farmerp_app;
 
 \echo ''

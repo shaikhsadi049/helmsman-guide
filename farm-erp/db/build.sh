@@ -54,6 +54,11 @@ if [[ $SMOKE -eq 1 && -f "$HERE/smoke_test.sql" ]]; then
   "${PSQL[@]}" -d "$DB" -f "$HERE/smoke_test.sql"
 fi
 
+if [[ $SMOKE -eq 1 && -f "$HERE/feed_test.sql" ]]; then
+  say "ফিড ও গুদামের পরীক্ষা"
+  "${PSQL[@]}" -d "$DB" -f "$HERE/feed_test.sql"
+fi
+
 if [[ $SMOKE -eq 1 && -f "$HERE/rls_test.sql" ]]; then
   say "টেন্যান্ট পৃথকীকরণ (RLS) পরীক্ষা"
   "${PSQL[@]}" -d "$DB" -f "$HERE/rls_test.sql" | grep -E '✔|✘|NOTICE' || true
@@ -73,6 +78,12 @@ union all select 'রোগ ও কারণ',      count(*) from master.disease
 union all select 'টিকা',            count(*) from master.vaccine
 union all select 'টিকার সূচির সারি',  count(*) from master.vaccine_schedule_line
 union all select 'জীবনচক্র টেমপ্লেট', count(*) from master.lifecycle_template
-union all select 'জীবনচক্র পর্যায়',   count(*) from master.lifecycle_phase;"
+union all select 'জীবনচক্র পর্যায়',   count(*) from master.lifecycle_phase
+union all select 'পণ্য',             count(*) from master.item
+union all select 'পুষ্টি উপাদান',      count(*) from master.nutrient
+union all select 'পুষ্টিমানের সারি',   count(*) from master.item_nutrient
+union all select 'স্টক চলাচলের ধরন',  count(*) from master.stock_movement_type
+union all select 'পুষ্টি চাহিদার সেট',  count(*) from master.ration_requirement_set
+union all select 'চাহিদার সারি',      count(*) from master.ration_requirement_line;"
 
 printf '\n\033[1;32m✔ সম্পূর্ণ সফল — %s\033[0m\n\n' "$DB"

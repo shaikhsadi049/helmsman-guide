@@ -29,7 +29,7 @@ begin
       from pg_class c
       join pg_namespace n on n.oid = c.relnamespace
      where c.relkind = 'r'
-       and n.nspname in ('core','master','prod')
+       and n.nspname in ('core','master','prod','inv','feed')
        and c.relname <> all(v_exempt)
        and not exists (
          select 1 from core.ss_table_registry r
