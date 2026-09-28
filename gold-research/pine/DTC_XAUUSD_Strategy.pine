@@ -1,0 +1,295 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Based on "DTC - v1.36" (MPL-2.0). Converted to a backtestable strategy and tuned for XAUUSD.
+// Every improvement has an on/off switch so you can compare it against the original logic.
+
+// Costs: commission 0.15 USD per ounce per side approximates a ~0.30 USD gold spread.
+// Change it in the "Properties" tab to match your broker.
+
+//@version=5
+strategy("DTC Strategy - XAUUSD", shorttitle="DTC-XAU", overlay=true,
+     initial_capital=10000, currency=currency.USD,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.15,
+     slippage=2, pyramiding=0,
+     margin_long=1, margin_short=1,
+     max_labels_count=500)
+
+// =====================================
+// INPUTS
+// =====================================
+g_date = "Backtest Period"
+startDate = input.time(timestamp("2021-01-01 00:00"), "Start", group=g_date)
+endDate   = input.time(timestamp("2030-01-01 00:00"), "End",   group=g_date)
+
+g_ma = "Trend (MA Stack)"
+maType = input.string("EMA", "MA Type", options=["EMA", "KAMA (adaptive)"], group=g_ma)
+len1 = input.int(30, "MA 1", minval=1, group=g_ma)
+len2 = input.int(35, "MA 2", minval=1, group=g_ma)
+len3 = input.int(40, "MA 3", minval=1, group=g_ma)
+len4 = input.int(45, "MA 4", minval=1, group=g_ma)
+len5 = input.int(50, "MA 5", minval=1, group=g_ma)
+len6 = input.int(60, "MA 6", minval=1, group=g_ma)
+erLen = input.int(10, "KAMA Efficiency Length", minval=2, group=g_ma)
+
+g_entry = "Entry Rules"
+entryMode   = input.string("Trend + filters", "Entry Mode", options=["Flip only (original)", "Trend + filters"], group=g_entry,
+     tooltip="Flip only: enter only on the bar where the MA stack first aligns (original DTC).\nTrend + filters: enter on the first bar where the stack is aligned AND all filters pass, so a signal is not lost when a filter blocks the flip bar.")
+allowRepeat = input.bool(false, "Allow re-entry in the same trend", group=g_entry,
+     tooltip="Off = one trade per trend swing: after a BUY, the next BUY needs the MA stack to break and re-align first. SELLs are not blocked by a previous SELL once its trend swing has ended.")
+
+g_filter = "Filters"
+useADX   = input.bool(true, "ADX trend-strength filter", group=g_filter)
+adxLen   = input.int(14, "ADX Length", minval=1, group=g_filter)
+adxMin   = input.float(25, "Min ADX", minval=0, group=g_filter)
+useHTF   = input.bool(true, "Higher-timeframe filter (EMA20 vs EMA50)", group=g_filter)
+htfA     = input.timeframe("60",  "HTF 1", group=g_filter)
+htfB     = input.timeframe("240", "HTF 2", group=g_filter)
+useSess  = input.bool(false, "Session filter (UTC)", group=g_filter)
+sessStr  = input.session("0700-2000", "Session", group=g_filter, tooltip="Default = London + New York.")
+useVol   = input.bool(false, "Min volatility filter (ATR % of price)", group=g_filter,
+     tooltip="Replaces the original absolute 'ATR > 0.5' check, which does not scale with price.")
+volMinPct = input.float(0.05, "Min ATR %", minval=0, step=0.01, group=g_filter)
+
+g_risk = "Stop Loss / Take Profit"
+atrLen   = input.int(14, "ATR Length", minval=1, group=g_risk)
+slMode   = input.string("ATR", "Stop Loss Mode", options=["Percent (original)", "ATR", "Swing"], group=g_risk)
+slPct    = input.float(0.25, "SL % (Percent mode)", minval=0.01, step=0.05, group=g_risk)
+atrMult  = input.float(1.5, "SL ATR multiplier (ATR mode)", minval=0.1, step=0.1, group=g_risk)
+swingLen = input.int(8, "Swing lookback bars (Swing mode)", minval=2, group=g_risk)
+swingBuf = input.float(0.2, "Swing buffer (x ATR)", minval=0, step=0.1, group=g_risk)
+tp1R = input.float(1.0, "TP1 (R)", minval=0.1, step=0.1, group=g_risk)
+tp2R = input.float(2.0, "TP2 (R)", minval=0.1, step=0.1, group=g_risk)
+tp3R = input.float(3.0, "TP3 (R)", minval=0.1, step=0.1, group=g_risk)
+tp4R = input.float(4.0, "TP4 (R)", minval=0.1, step=0.1, group=g_risk)
+tp1Pct = input.float(25, "Close % at TP1", minval=0, maxval=100, group=g_risk)
+tp2Pct = input.float(25, "Close % at TP2", minval=0, maxval=100, group=g_risk)
+tp3Pct = input.float(25, "Close % at TP3", minval=0, maxval=100, group=g_risk, tooltip="The rest is closed at TP4.")
+useBE  = input.bool(true, "Move SL to breakeven after TP1", group=g_risk)
+
+g_size = "Position Size"
+sizeMode = input.string("Risk % of equity", "Sizing", options=["Fixed", "Risk % of equity"], group=g_size)
+fixedQty = input.float(1, "Fixed qty (ounces)", minval=0.01, group=g_size)
+riskPct  = input.float(1.0, "Risk per trade %", minval=0.1, maxval=10, step=0.1, group=g_size)
+maxQty   = input.float(100, "Max qty (ounces)", minval=0.01, group=g_size)
+
+g_disp = "Display"
+showDash = input.bool(true, "Show filter dashboard", group=g_disp)
+showBlocked = input.bool(true, "Mark blocked signals (x)", group=g_disp,
+     tooltip="Grey x = the MA stack aligned but a filter blocked the trade.")
+
+// =====================================
+// MOVING AVERAGES
+// =====================================
+// KAMA: behaves like EMA(len) in choppy markets, speeds up when the move is efficient (trending).
+// The slow constant is sqrt(2/(len+1)) so that after Kaufman's squaring it equals the EMA(len) alpha.
+f_kama(src, len) =>
+    change = math.abs(src - src[erLen])
+    noise  = math.sum(math.abs(src - src[1]), erLen)
+    er     = noise != 0 ? change / noise : 0.0
+    fastSC = 2.0 / 3.0
+    slowSC = math.sqrt(2.0 / (len + 1))
+    sc     = math.pow(er * (fastSC - slowSC) + slowSC, 2)
+    float k = na
+    k := na(k[1]) ? src : k[1] + sc * (src - k[1])
+    k
+
+f_ma(len) =>
+    e = ta.ema(close, len)
+    k = f_kama(close, len)
+    maType == "EMA" ? e : k
+
+ma1 = f_ma(len1)
+ma2 = f_ma(len2)
+ma3 = f_ma(len3)
+ma4 = f_ma(len4)
+ma5 = f_ma(len5)
+ma6 = f_ma(len6)
+
+bull = ma1 > ma2 and ma2 > ma3 and ma3 > ma4 and ma4 > ma5 and ma5 > ma6
+bear = ma1 < ma2 and ma2 < ma3 and ma3 < ma4 and ma4 < ma5 and ma5 < ma6
+
+maColor = bull ? color.lime : bear ? color.red : color.gray
+plot(ma1, "MA 1", maColor, 3)
+plot(ma2, "MA 2", maColor, 2)
+plot(ma3, "MA 3", maColor, 2)
+plot(ma4, "MA 4", maColor, 1)
+plot(ma5, "MA 5", maColor, 1)
+plot(ma6, "MA 6", maColor, 1)
+
+// =====================================
+// FILTERS
+// =====================================
+atr = ta.atr(atrLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+
+// Non-repainting HTF values: previous *closed* HTF bar only.
+f_htfBull(tf) =>
+    fast = request.security(syminfo.tickerid, tf, ta.ema(close, 20)[1], lookahead=barmerge.lookahead_on)
+    slow = request.security(syminfo.tickerid, tf, ta.ema(close, 50)[1], lookahead=barmerge.lookahead_on)
+    fast > slow
+
+htfABull = f_htfBull(htfA)
+htfBBull = f_htfBull(htfB)
+
+inDate  = time >= startDate and time <= endDate
+adxOk   = not useADX or adx >= adxMin
+sessOk  = not useSess or not na(time(timeframe.period, sessStr, "UTC"))
+volOk   = not useVol or (atr / close * 100 >= volMinPct)
+htfLong  = not useHTF or (htfABull and htfBBull)
+htfShort = not useHTF or (not htfABull and not htfBBull)
+
+commonOk = inDate and adxOk and sessOk and volOk
+
+// =====================================
+// SIGNALS
+// =====================================
+var int lastDir = 0   // 1 = last trade long, -1 = last trade short
+
+longSetup  = entryMode == "Flip only (original)" ? bull and not bull[1] : bull
+shortSetup = entryMode == "Flip only (original)" ? bear and not bear[1] : bear
+
+// One trade per trend swing: the flag clears as soon as the MA stack stops being aligned.
+// (A "last trade must alternate" rule would deadlock with the HTF filter: in a long
+//  downtrend no BUY can pass, so no second SELL would ever be allowed.)
+var bool longUsed  = false
+var bool shortUsed = false
+if not bull
+    longUsed := false
+if not bear
+    shortUsed := false
+
+longSignal  = barstate.isconfirmed and longSetup and commonOk and htfLong and strategy.position_size <= 0 and (allowRepeat or not longUsed)
+shortSignal = barstate.isconfirmed and shortSetup and commonOk and htfShort and strategy.position_size >= 0 and (allowRepeat or not shortUsed) and not longSignal
+
+// Stack just aligned, but a filter said no.
+longBlocked  = barstate.isconfirmed and bull and not bull[1] and not longSignal and strategy.position_size <= 0
+shortBlocked = barstate.isconfirmed and bear and not bear[1] and not shortSignal and strategy.position_size >= 0
+
+// =====================================
+// LEVELS & SIZE
+// =====================================
+swingLow  = ta.lowest(low, swingLen)
+swingHigh = ta.highest(high, swingLen)
+
+f_stop(isLong) =>
+    float s = na
+    if slMode == "Percent (original)"
+        s := isLong ? close * (1 - slPct / 100) : close * (1 + slPct / 100)
+    else if slMode == "ATR"
+        s := isLong ? close - atr * atrMult : close + atr * atrMult
+    else
+        s := isLong ? swingLow - atr * swingBuf : swingHigh + atr * swingBuf
+    // Safety: the stop must sit on the losing side of the entry.
+    if isLong and s >= close
+        s := close - atr * atrMult
+    if not isLong and s <= close
+        s := close + atr * atrMult
+    s
+
+f_qty(riskPerUnit) =>
+    float q = fixedQty
+    if sizeMode == "Risk % of equity" and riskPerUnit > 0
+        q := (strategy.equity * riskPct / 100) / (riskPerUnit * syminfo.pointvalue)
+    math.round(math.max(math.min(q, maxQty), 0.04), 2)
+
+var float entryP = na
+var float slP    = na
+var float t1 = na
+var float t2 = na
+var float t3 = na
+var float t4 = na
+var float qtyEntry = na
+var bool  beDone = false
+
+if longSignal or shortSignal
+    isLong = longSignal
+    entryP := close
+    slP    := f_stop(isLong)
+    r = math.abs(entryP - slP)
+    dirMul = isLong ? 1 : -1
+    t1 := entryP + dirMul * r * tp1R
+    t2 := entryP + dirMul * r * tp2R
+    t3 := entryP + dirMul * r * tp3R
+    t4 := entryP + dirMul * r * tp4R
+    qtyEntry := f_qty(r)
+    beDone := false
+    lastDir := isLong ? 1 : -1
+    if isLong
+        longUsed := true
+    else
+        shortUsed := true
+    if isLong
+        strategy.entry("L", strategy.long, qty=qtyEntry, comment="BUY")
+    else
+        strategy.entry("S", strategy.short, qty=qtyEntry, comment="SELL")
+
+    if isLong
+        alert("DTC-XAU BUY " + syminfo.ticker + " @ " + str.tostring(close, format.mintick) +
+             " SL " + str.tostring(slP, format.mintick) + " TP1 " + str.tostring(t1, format.mintick), alert.freq_once_per_bar_close)
+    else
+        alert("DTC-XAU SELL " + syminfo.ticker + " @ " + str.tostring(close, format.mintick) +
+             " SL " + str.tostring(slP, format.mintick) + " TP1 " + str.tostring(t1, format.mintick), alert.freq_once_per_bar_close)
+
+// Breakeven: once TP1 has filled (position got smaller), move the stop to the average entry price.
+inSameDir = (lastDir == 1 and strategy.position_size > 0) or (lastDir == -1 and strategy.position_size < 0)
+if useBE and not beDone and inSameDir and not (longSignal or shortSignal) and math.abs(strategy.position_size) < qtyEntry * 0.999
+    slP := strategy.position_avg_price
+    beDone := true
+
+// =====================================
+// EXITS (re-issued every bar so the stop follows breakeven)
+// =====================================
+q1 = math.round(qtyEntry * tp1Pct / 100, 2)
+q2 = math.round(qtyEntry * tp2Pct / 100, 2)
+q3 = math.round(qtyEntry * tp3Pct / 100, 2)
+
+if lastDir == 1
+    if q1 > 0
+        strategy.exit("L-TP1", "L", qty=q1, limit=t1, stop=slP, comment_profit="TP1", comment_loss="SL")
+    if q2 > 0
+        strategy.exit("L-TP2", "L", qty=q2, limit=t2, stop=slP, comment_profit="TP2", comment_loss="SL")
+    if q3 > 0
+        strategy.exit("L-TP3", "L", qty=q3, limit=t3, stop=slP, comment_profit="TP3", comment_loss="SL")
+    strategy.exit("L-TP4", "L", limit=t4, stop=slP, comment_profit="TP4", comment_loss="SL")
+else if lastDir == -1
+    if q1 > 0
+        strategy.exit("S-TP1", "S", qty=q1, limit=t1, stop=slP, comment_profit="TP1", comment_loss="SL")
+    if q2 > 0
+        strategy.exit("S-TP2", "S", qty=q2, limit=t2, stop=slP, comment_profit="TP2", comment_loss="SL")
+    if q3 > 0
+        strategy.exit("S-TP3", "S", qty=q3, limit=t3, stop=slP, comment_profit="TP3", comment_loss="SL")
+    strategy.exit("S-TP4", "S", limit=t4, stop=slP, comment_profit="TP4", comment_loss="SL")
+
+// =====================================
+// PLOTS
+// =====================================
+inPos = strategy.position_size != 0
+plot(inPos ? entryP : na, "Entry", color.blue,  1, plot.style_linebr)
+plot(inPos ? slP    : na, "SL",    color.red,   2, plot.style_linebr)
+plot(inPos ? t1     : na, "TP1",   color.green, 1, plot.style_linebr)
+plot(inPos ? t2     : na, "TP2",   color.green, 1, plot.style_linebr)
+plot(inPos ? t3     : na, "TP3",   color.green, 1, plot.style_linebr)
+plot(inPos ? t4     : na, "TP4",   color.green, 1, plot.style_linebr)
+
+plotshape(longSignal,  "BUY",  shape.labelup,   location.belowbar, color.green, text="BUY",  textcolor=color.white, size=size.small)
+plotshape(shortSignal, "SELL", shape.labeldown, location.abovebar, color.red,   text="SELL", textcolor=color.white, size=size.small)
+plotshape(showBlocked and longBlocked,  "BUY blocked",  shape.xcross, location.belowbar, color.gray, size=size.tiny)
+plotshape(showBlocked and shortBlocked, "SELL blocked", shape.xcross, location.abovebar, color.gray, size=size.tiny)
+
+// =====================================
+// DASHBOARD
+// =====================================
+f_cell(tbl, row, name, txt, ok) =>
+    table.cell(tbl, 0, row, name, text_color=color.white, bgcolor=color.black, text_size=size.small)
+    table.cell(tbl, 1, row, txt, text_color=color.black, bgcolor=ok ? color.lime : color.red, text_size=size.small)
+
+if showDash
+    var table dash = table.new(position.top_right, 2, 6, bgcolor=color.black, border_width=1)
+    if barstate.islast
+        table.cell(dash, 0, 0, "DTC-XAU", text_color=color.yellow, bgcolor=color.black, text_size=size.small)
+        table.cell(dash, 1, 0, maType, text_color=color.white, bgcolor=color.black, text_size=size.small)
+        f_cell(dash, 1, "Trend", bull ? "Bull" : bear ? "Bear" : "None", bull or bear)
+        f_cell(dash, 2, "ADX", str.tostring(adx, "#.0") + (useADX ? "" : " (off)"), adxOk)
+        f_cell(dash, 3, "HTF " + htfA, htfABull ? "Bull" : "Bear", htfABull)
+        f_cell(dash, 4, "HTF " + htfB, htfBBull ? "Bull" : "Bear", htfBBull)
+        f_cell(dash, 5, "Session", useSess ? (sessOk ? "Open" : "Closed") : "off", sessOk)
