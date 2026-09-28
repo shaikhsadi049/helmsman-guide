@@ -39,9 +39,11 @@ farm-erp/
 ├── docs/
 │   ├── 01-conventions.md    কলাম কনভেনশন, অডিট, RLS, সিঙ্ক
 │   ├── 02-domain-model.md   দুই ট্র্যাকিং প্যাটার্ন, সমন্বিত খামারের ডিজাইন
-│   └── 03-roadmap.md        কী তৈরি, কী বাকি
+│   ├── 03-roadmap.md        কী তৈরি, কী বাকি
+│   └── 04-tooling.md        ব্রাউজিং টুল ও RLS প্রসঙ্গ সেটআপ
 └── db/
     ├── build.sh             পুরো বিল্ড ও পরীক্ষা
+    ├── dev_roles.sql        GUI টুল দিয়ে কানেক্ট করার লগইন ভূমিকা
     ├── schema/              00–08 + 99_verify
     ├── seed/                01–08 মাস্টার ডেটা (সবই idempotent)
     ├── smoke_test.sql       বাস্তব সমন্বিত খামার দিয়ে ৯ বিভাগে যাচাই
@@ -63,6 +65,16 @@ farm-erp/
 | `99_verify.sql` CI-তে | কনভেনশন নথিতে লেখা থাকলে ভাঙে; যাচাইয়ে থাকলে ভাঙে না |
 
 বিস্তারিত: [docs/01-conventions.md](docs/01-conventions.md)
+
+## ডাটাবেস দেখা
+
+**DBeaver Community** সুপারিশ। তবে একটা ফাঁদ আছে: RLS চালু থাকায় `farmerp_dev`
+ভূমিকা দিয়ে কানেক্ট করে প্রসঙ্গ না বসালে টেবিল ফাঁকা দেখাবে (fail-closed, ডেটা
+হারায়নি)। সেটআপ ও কানেকশন বুটস্ট্র্যাপ: [docs/04-tooling.md](docs/04-tooling.md)
+
+```bash
+psql -d farmerp -v app_password='...' -f db/dev_roles.sql
+```
 
 ## অবস্থা
 
