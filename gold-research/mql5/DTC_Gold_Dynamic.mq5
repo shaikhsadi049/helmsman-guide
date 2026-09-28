@@ -67,6 +67,12 @@ input double          S3_qTP     = 0.30;
 input double          S3_Lock    = 0.25;
 input double          S3_qTR     = 0.50;
 
+input group "=== Daily DXY (tighten runner trail when the dollar turns against gold) ==="
+input bool   UseDXY           = true;
+input string DXYSymbol        = "";     // e.g. "DXY" or "USDX"; empty = build DXY from 6 FX pairs
+input string FxSuffix         = "";     // broker suffix for FX pairs, e.g. ".m"
+input double DXYAgainstTrail  = 0.7;    // trail width multiplier when USD daily trend opposes the trade
+
 input group "=== Session (UTC hours) ==="
 input int SessFromUTC = 7;
 input int SessToUTC   = 20;
@@ -238,6 +244,35 @@ double TrailQuantile(double q)
    return Quantile(x, c, q);
 }
 
+//------------------------------------------------------------------ daily DXY
+// DXY = 50.14348112 * EURUSD^-0.576 * USDJPY^0.136 * GBPUSD^-0.119 * USDCAD^0.091 * USDSEK^0.042 * USDCHF^0.036
+double DxyClose(int shift)
+{
+   if(DXYSymbol != "") return iClose(DXYSymbol, PERIOD_D1, shift);
+   string p[6] = {"EURUSD", "USDJPY", "GBPUSD", "USDCAD", "USDSEK", "USDCHF"};
+   double w[6] = {-0.576, 0.136, -0.119, 0.091, 0.042, 0.036};
+   datetime t = iTime(_Symbol, PERIOD_D1, shift);
+   double v = 50.14348112;
+   for(int k = 0; k < 6; k++)
+   {
+      string sym = p[k] + FxSuffix;
+      int sh = iBarShift(sym, PERIOD_D1, t, false);
+      double c = sh < 0 ? 0 : iClose(sym, PERIOD_D1, sh);
+      if(c <= 0) return 0;
+      v *= MathPow(c, w[k]);
+   }
+   return v;
+}
+// +1 = USD daily uptrend (EMA20 > EMA50 on the previous closed day), -1 = downtrend, 0 = unknown
+int UsdDailyDir()
+{
+   int n = 160; double c[]; ArrayResize(c, n);
+   for(int k = 0; k < n; k++) { c[k] = DxyClose(n - k); if(c[k] <= 0) return 0; }   // oldest -> newest, ends at shift 1
+   double a20 = 2.0 / 21, a50 = 2.0 / 51, e20 = c[0], e50 = c[0];
+   for(int k = 1; k < n; k++) { e20 += a20 * (c[k] - e20); e50 += a50 * (c[k] - e50); }
+   return e20 > e50 ? 1 : -1;
+}
+
 //------------------------------------------------------------------ trading
 double Lots(double stopDist)
 {
@@ -267,6 +302,11 @@ void Open(Slot &s, int dir, double lvl, double atr)
    double r1 = 0;
    if(s.qtp > 0) r1 = MathMax(R1_MIN, MathMin(R1_MAX, SigQuantile(s, 1, s.qtp, 1.0) / k));
    double tw = s.qtr > 0 ? TrailQuantile(s.qtr) * B(hA[TI(PERIOD_H4)], 1) : 0;
+   if(UseDXY && tw > 0)
+   {
+      int usd = UsdDailyDir();
+      if(usd != 0 && usd == dir) tw *= DXYAgainstTrail;     // USD rising vs gold long (or falling vs short) -> protect profit sooner
+   }
    s.kNow = k; s.r1Now = r1; s.trNow = tw;
    if((SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point > MaxSpreadPoints) return;
    double lots = Lots(risk);
