@@ -1,0 +1,5 @@
+exec(open("blend_warm.py").read().split("for mx in (5, 3):")[0])
+full = pd.read_parquet("../trades_v3_reg.parquet"); V = pd.read_parquet("../dt_mt5.parquet")[(full.slot != 6).values].reset_index(drop=True)
+print("corr with research score:", np.corrcoef(np.nan_to_num(V.mt5.values, nan=.5), DT)[0, 1].round(3))
+DT[:] = np.nan_to_num(V.mt5.values, nan=0.5)
+for mx in (5, 3): roww(f"EA-style trend max{mx}", mode="tr", mx=mx)

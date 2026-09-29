@@ -9,19 +9,21 @@
 //| Entry : EMA-stack pullback + higher-TF confluence + H4/D1 trend. |
 //+------------------------------------------------------------------+
 #property copyright "DTC research"
-#property version   "3.11"
+#property version   "3.20"
 #property strict
 #include <Trade/Trade.mqh>
 
 enum ADX_RULE { ADX_ANY = 0, ADX_LT30 = 1 };
 enum ENTRY_KIND { E_PB = 0, E_RSI2 = 1, E_BRK = 2 };
-enum RISK_MODE { RISK_DD_EDGE = 0, RISK_DD = 1, RISK_EDGE = 2, RISK_FIXED_MAX = 3 };
+enum RISK_MODE { RISK_DD_TREND = 0, RISK_DD_EDGE = 1, RISK_DD = 2, RISK_EDGE = 3, RISK_FIXED_MAX = 4 };
 #define NS 7
 
 input group "=== Common ==="
 input double MinRiskPercent   = 1.0;    // dynamic risk per trade: lowest % of equity
 input double MaxRiskPercent   = 5.0;    // dynamic risk per trade: highest % of equity (0 = use FixedLots)
-input RISK_MODE RiskMode      = RISK_DD_EDGE; // DD_EDGE = drawdown x slot edge (research best), DD = drawdown only, EDGE = edge only (risky), FIXED_MAX = always MaxRiskPercent
+input RISK_MODE RiskMode      = RISK_DD_TREND; // DD_TREND = drawdown x gold daily trend strength (research best), DD_EDGE = drawdown x slot edge, DD = drawdown only, EDGE = edge only (risky), FIXED_MAX = always MaxRiskPercent
+input int    TrendEMA         = 50;     // DD_TREND: daily EMA; trend strength = |close - EMA| / daily ATR
+input int    TrendLookback    = 250;    // DD_TREND: strength is ranked against the last N days (0..1)
 input double EdgeLow          = 0.73;   // slot edge (median MFE / median MAE of recent signals) at or below this -> lowest edge score
 input double EdgeHigh         = 2.6;    // slot edge at or above this -> full edge score
 input double FixedLots        = 0.01;   // used when MaxRiskPercent = 0
@@ -328,6 +330,25 @@ double EdgeScore(Slot &s)
    if(mae <= 0 || mfe < 0 || EdgeHigh <= EdgeLow) return 0.5;    // not enough history yet -> neutral
    return MathMax(0.0, MathMin(1.0, (mfe / mae - EdgeLow) / (EdgeHigh - EdgeLow)));
 }
+// gold daily trend strength now, ranked 0..1 against the last TrendLookback days (0.5 while history is short)
+int hTrE = INVALID_HANDLE, hTrA = INVALID_HANDLE; datetime trDay = 0; double trScore = 0.5;
+double TrendScore()
+{
+   datetime d = iTime(_Symbol, PERIOD_D1, 0);
+   if(d == trDay) return trScore;
+   if(hTrE == INVALID_HANDLE) hTrE = iMA(_Symbol, PERIOD_D1, TrendEMA, 0, MODE_EMA, PRICE_CLOSE);
+   if(hTrA == INVALID_HANDLE) hTrA = iATR(_Symbol, PERIOD_D1, 14);
+   int n = TrendLookback;
+   double e[], a[], c[];
+   ArraySetAsSeries(e, true); ArraySetAsSeries(a, true); ArraySetAsSeries(c, true);
+   if(CopyBuffer(hTrE, 0, 1, n, e) != n || CopyBuffer(hTrA, 0, 1, n, a) != n || CopyClose(_Symbol, PERIOD_D1, 1, n, c) != n)
+      return 0.5;                                     // data not ready: neutral, try again next call
+   double v0 = a[0] > 0 ? MathAbs(c[0] - e[0]) / a[0] : 0; int below = 0, cnt = 0;
+   for(int k = 1; k < n; k++) if(a[k] > 0) { cnt++; if(MathAbs(c[k] - e[k]) / a[k] < v0) below++; }
+   trScore = cnt > n / 2 ? (double)below / cnt : 0.5;
+   trDay = d;
+   return trScore;
+}
 // risk % for a new trade of this slot: MinRiskPercent .. MaxRiskPercent
 double RiskPctNow(Slot &s)
 {
@@ -336,7 +357,8 @@ double RiskPctNow(Slot &s)
    if(RiskMode == RISK_FIXED_MAX)  x = 1.0;
    else if(RiskMode == RISK_DD)    x = DDScore();
    else if(RiskMode == RISK_EDGE)  x = EdgeScore(s);
-   else                            x = DDScore() * (0.5 + 0.5 * EdgeScore(s));
+   else if(RiskMode == RISK_DD_EDGE) x = DDScore() * (0.5 + 0.5 * EdgeScore(s));
+   else                            x = DDScore() * TrendScore();
    return mn + (mx - mn) * x;
 }
 
@@ -574,7 +596,7 @@ void OnTimer()
    ready = true;
    EventKillTimer();
 }
-void OnDeinit(const int r) { EventKillTimer(); Comment(""); }
+void OnDeinit(const int r) { EventKillTimer(); Comment(""); if(hTrE != INVALID_HANDLE) IndicatorRelease(hTrE); if(hTrA != INVALID_HANDLE) IndicatorRelease(hTrA); }
 
 void OnTick()
 {
@@ -603,7 +625,7 @@ void OnTick()
    }
    if(ShowPanel)
    {
-      string txt = "DTC Gold Dynamic (7 slots)\n";
+      string txt = StringFormat("DTC Gold Dynamic | drawdown %.1f%% | gold trend strength %.2f\n", CurrentDrawdown() * 100.0, TrendScore());
       for(int k = 0; k < NS; k++) if(S[k].on)
          txt += StringFormat("Slot %d %s | signals %d | last SL %.2f ATR, TP1 %.2f R, trail $%.1f | risk now %.2f%%\n",
                              k + 1, EnumToString(S[k].tf), S[k].nsig, S[k].kNow, S[k].r1Now, S[k].trNow, RiskPctNow(S[k]));
