@@ -9,7 +9,7 @@
 //| Entry : EMA-stack pullback + higher-TF confluence + H4/D1 trend. |
 //+------------------------------------------------------------------+
 #property copyright "DTC research"
-#property version   "3.10"
+#property version   "3.11"
 #property strict
 #include <Trade/Trade.mqh>
 
@@ -49,7 +49,7 @@ input string Slot3 = "TF=M3;ENTRY=RSI2;RSI=10;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;
 input string Slot4 = "TF=M30;ENTRY=BRK;BRKN=20;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.25;QTR=0.8;F1=0";
 input string Slot5 = "TF=M5;ENTRY=PB;EMA=30;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.5;QTP=0.5;LOCK=0.25;QTR=0.5;F1=0.5";
 input string Slot6 = "TF=M3;ENTRY=RSI2;RSI=5;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.5;F1=0.5";
-input string Slot7 = "TF=M3;ENTRY=BRK;BRKN=20;CONF1=M15;CONF2=H1;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.8;F1=0";
+input string Slot7 = "OFF;TF=M3;ENTRY=BRK;BRKN=20;CONF1=M15;CONF2=H1;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.8;F1=0";
 
 input group "=== Daily DXY (tighten runner trail when the dollar turns against gold) ==="
 input bool   UseDXY           = true;
@@ -512,7 +512,7 @@ string SpecGet(string spec, string key, string def)
 void Load(int k, string spec)
 {
    string sp = spec; StringTrimLeft(sp); StringTrimRight(sp); string up = sp; StringToUpper(up);
-   S[k].on = !(up == "" || up == "OFF");
+   S[k].on = !(up == "" || up == "OFF" || StringFind(up, "OFF;") == 0);   // "OFF;..." keeps the spec but disables the slot
    S[k].magic = MagicBase + k; S[k].nsig = 0; S[k].lastBar = 0; S[k].kNow = 0; S[k].r1Now = 0; S[k].trNow = 0; S[k].riskNow = 0;
    ArrayResize(S[k].sigs, 0);
    if(!S[k].on) return;
