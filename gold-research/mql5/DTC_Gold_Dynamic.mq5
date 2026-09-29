@@ -21,6 +21,7 @@ input double FixedLots        = 0.01;   // used when RiskPercent = 0
 input double MaxSpreadPoints  = 80;     // skip entries when spread is wider (points)
 input int    ServerUTCOffset  = 2;      // broker server time minus UTC, hours
 input int    MaxHoldDays      = 30;     // safety time exit
+input int    MaxPositions     = 1;      // per slot. >1 = pyramiding: add only while all open positions are risk-free (hedging account)
 input double TP1Fraction      = 0.5;    // share closed at TP1. 0.5 = smoother equity; 0 = only lock the stop at TP1 (more total profit, bumpier)
 input int    BackfillDays     = 240;    // days of history scanned at start to calibrate (research used ~7 months)
 input ulong  MagicBase        = 881000;
@@ -93,8 +94,6 @@ struct Slot
    bool on; ENUM_TIMEFRAMES tf, c1, c2; int pb, adx, horizon, look; double qsl, qtp, lock, qtr; ulong magic;
    Sig sigs[]; int nsig;
    datetime lastBar;
-   // open trade state
-   double risk, lvl, entry, best, trailW; bool tp1Done; datetime openT;
    // last calibrated values (for the panel)
    double kNow, r1Now, trNow;
 };
@@ -285,17 +284,40 @@ double Lots(double stopDist)
    if(lots < mn) return 0;                 // risk too small for the minimum lot -> skip rather than over-risk
    return MathMin(mx, lots);
 }
-bool GetPos(Slot &s, ulong &tk, int &dir, double &vol, double &sl)
+// ---- per-position state (several positions per slot when pyramiding)
+struct PState { ulong tk; int slot; int dir; double risk, lvl, entry, best, trailW, r1, lock; bool tp1Done; datetime openT; };
+PState PS[]; int nPS = 0;
+int FindPS(ulong tk) { for(int k = 0; k < nPS; k++) if(PS[k].tk == tk) return k; return -1; }
+void DropClosed()
 {
+   for(int k = nPS - 1; k >= 0; k--)
+      if(!PositionSelectByTicket(PS[k].tk)) { for(int j = k + 1; j < nPS; j++) PS[j - 1] = PS[j]; nPS--; }
+}
+int SlotPositions(Slot &s, int &dirOut, bool &allLocked)
+{
+   int c = 0; allLocked = true; dirOut = 0;
    for(int k = PositionsTotal() - 1; k >= 0; k--)
    {
       ulong t = PositionGetTicket(k);
-      if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == (long)s.magic)
-      { tk = t; vol = PositionGetDouble(POSITION_VOLUME); sl = PositionGetDouble(POSITION_SL); dir = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 1 : -1; return true; }
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol || PositionGetInteger(POSITION_MAGIC) != (long)s.magic) continue;
+      int d = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 1 : -1;
+      double sl = PositionGetDouble(POSITION_SL), op = PositionGetDouble(POSITION_PRICE_OPEN);
+      bool locked = sl > 0 && ((d == 1 && sl >= op) || (d == -1 && sl <= op));
+      if(!locked) allLocked = false;
+      if(dirOut != 0 && dirOut != d) allLocked = false;
+      dirOut = d; c++;
    }
-   return false;
+   return c;
 }
-void Open(Slot &s, int dir, double lvl, double atr)
+// a new entry is allowed when the slot is flat, or (pyramiding) every open position is already risk-free in the same direction
+bool CanEnter(Slot &s, int dir)
+{
+   int d; bool locked;
+   int c = SlotPositions(s, d, locked);
+   if(c == 0) return true;
+   return c < MaxPositions && locked && d == dir;
+}
+void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
 {
    double k = MathMax(K_MIN, MathMin(K_MAX, SigQuantile(s, 0, s.qsl, 2.0)));
    double risk = k * atr;
@@ -310,56 +332,72 @@ void Open(Slot &s, int dir, double lvl, double atr)
    s.kNow = k; s.r1Now = r1; s.trNow = tw;
    if((SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point > MaxSpreadPoints) return;
    double lots = Lots(risk);
-   if(lots <= 0) { Print("Slot ", s.magic - MagicBase + 1, ": stop $", DoubleToString(risk, 2), " too wide for RiskPercent - skipped"); return; }
+   if(lots <= 0) { Print("Slot ", slotIdx + 1, ": stop $", DoubleToString(risk, 2), " too wide for RiskPercent - skipped"); return; }
    trade.SetExpertMagicNumber(s.magic);
    double sl = NormalizeDouble(lvl - dir * risk, _Digits);
    bool ok = dir == 1 ? trade.Buy(lots, _Symbol, 0, sl, 0, "DTC-dyn") : trade.Sell(lots, _Symbol, 0, sl, 0, "DTC-dyn");
-   if(ok)
+   if(ok && trade.ResultRetcode() == TRADE_RETCODE_DONE)
    {
-      s.risk = risk; s.lvl = lvl; s.entry = trade.ResultPrice(); s.best = s.entry; s.trailW = tw;
-      s.tp1Done = (r1 <= 0); s.r1Now = r1; s.openT = TimeCurrent();
+      ArrayResize(PS, nPS + 1);
+      PS[nPS].tk = trade.ResultOrder(); PS[nPS].slot = slotIdx; PS[nPS].dir = dir; PS[nPS].risk = risk; PS[nPS].lvl = lvl;
+      PS[nPS].entry = trade.ResultPrice(); PS[nPS].best = trade.ResultPrice(); PS[nPS].trailW = tw; PS[nPS].r1 = r1;
+      PS[nPS].lock = s.lock; PS[nPS].tp1Done = (r1 <= 0); PS[nPS].openT = TimeCurrent();
+      nPS++;
    }
 }
-void Manage(Slot &s, bool newH4)
+void ManagePosition(Slot &s, int slotIdx, ulong tk, bool newH4)
 {
-   ulong tk; int dir; double vol, sl;
-   if(!GetPos(s, tk, dir, vol, sl)) return;
+   if(!PositionSelectByTicket(tk)) return;
+   int dir = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 1 : -1;
+   double vol = PositionGetDouble(POSITION_VOLUME), sl = PositionGetDouble(POSITION_SL);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK), px = dir == 1 ? bid : ask;
-   if(s.risk <= 0 || s.openT == 0)
+   int i = FindPS(tk);
+   if(i < 0)
    {
-      // EA (re)started with a position already open: rebuild the trade state from the position itself
-      s.entry = PositionGetDouble(POSITION_PRICE_OPEN);
-      s.openT = (datetime)PositionGetInteger(POSITION_TIME);
-      s.lvl = s.entry;
-      s.risk = sl > 0 ? MathAbs(s.entry - sl) : 0;
-      s.best = dir == 1 ? MathMax(s.entry, px) : MathMin(s.entry, px);
-      s.tp1Done = true;                                  // partial state unknown -> do not partial-close again
-      s.trailW = s.qtr > 0 ? TrailQuantile(s.qtr) * B(hA[TI(PERIOD_H4)], 1) : 0;
-      if(s.risk <= 0) return;
+      // EA (re)started with this position already open: rebuild its state from the position itself
+      double op = PositionGetDouble(POSITION_PRICE_OPEN);
+      if(sl <= 0) return;
+      ArrayResize(PS, nPS + 1); i = nPS++;
+      PS[i].tk = tk; PS[i].slot = slotIdx; PS[i].dir = dir; PS[i].entry = op; PS[i].lvl = op; PS[i].risk = MathAbs(op - sl);
+      PS[i].best = dir == 1 ? MathMax(op, px) : MathMin(op, px); PS[i].r1 = 0; PS[i].lock = s.lock;
+      PS[i].tp1Done = true;                                  // partial state unknown -> never partial-close again
+      PS[i].trailW = s.qtr > 0 ? TrailQuantile(s.qtr) * B(hA[TI(PERIOD_H4)], 1) : 0;
+      PS[i].openT = (datetime)PositionGetInteger(POSITION_TIME);
    }
-   s.best = dir == 1 ? MathMax(s.best, px) : MathMin(s.best, px);
+   PS[i].best = dir == 1 ? MathMax(PS[i].best, px) : MathMin(PS[i].best, px);
    trade.SetExpertMagicNumber(s.magic);
    double nsl = sl;
-   if(!s.tp1Done && s.risk > 0 && (px - s.lvl) * dir >= s.r1Now * s.risk)
+   if(!PS[i].tp1Done && PS[i].risk > 0 && (px - PS[i].lvl) * dir >= PS[i].r1 * PS[i].risk)
    {
       double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
       double part = MathFloor(vol * TP1Fraction / step) * step;
       if(part >= SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN) && part < vol) trade.PositionClosePartial(tk, part);
-      s.tp1Done = true;
-      double lk = s.entry + dir * s.lock * s.risk;
+      PS[i].tp1Done = true;
+      double lk = PS[i].entry + dir * PS[i].lock * PS[i].risk;
       if((dir == 1 && lk > nsl) || (dir == -1 && lk < nsl)) nsl = lk;
    }
-   if(newH4 && s.trailW > 0)
+   if(newH4 && PS[i].trailW > 0)
    {
-      double ns = s.best - dir * s.trailW;
+      double ns = PS[i].best - dir * PS[i].trailW;
       if((dir == 1 && ns > nsl) || (dir == -1 && ns < nsl)) nsl = ns;
    }
-   if(TimeCurrent() - s.openT > MaxHoldDays * 86400) { trade.PositionClose(tk); return; }
+   if(TimeCurrent() - PS[i].openT > MaxHoldDays * 86400) { trade.PositionClose(tk); return; }
    if(MathAbs(nsl - sl) > _Point)
    {
       double lvl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
       if((dir == 1 && nsl < bid - lvl) || (dir == -1 && nsl > ask + lvl)) trade.PositionModify(tk, NormalizeDouble(nsl, _Digits), 0);
    }
+}
+void Manage(Slot &s, int slotIdx, bool newH4)
+{
+   ulong tks[]; int n = 0;
+   for(int k = PositionsTotal() - 1; k >= 0; k--)
+   {
+      ulong t = PositionGetTicket(k);
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == (long)s.magic)
+      { ArrayResize(tks, n + 1); tks[n++] = t; }
+   }
+   for(int k = 0; k < n; k++) ManagePosition(s, slotIdx, tks[k], newH4);
 }
 
 //------------------------------------------------------------------ setup
@@ -368,8 +406,7 @@ void Load(int k, bool on, ENUM_TIMEFRAMES tf, int pb, ENUM_TIMEFRAMES c1, ENUM_T
 {
    S[k].on = on; S[k].tf = tf; S[k].pb = pb; S[k].c1 = c1; S[k].c2 = c2; S[k].adx = adx; S[k].horizon = hor; S[k].look = look;
    S[k].qsl = qsl; S[k].qtp = qtp; S[k].lock = lock; S[k].qtr = qtr; S[k].magic = MagicBase + k; S[k].nsig = 0; S[k].lastBar = 0;
-   S[k].tp1Done = true; S[k].kNow = 0; S[k].r1Now = 0; S[k].trNow = 0;
-   S[k].risk = 0; S[k].openT = 0; S[k].best = 0; S[k].trailW = 0; S[k].entry = 0; S[k].lvl = 0;
+   S[k].kNow = 0; S[k].r1Now = 0; S[k].trNow = 0;
    ArrayResize(S[k].sigs, 0);
    TI(tf); TI(PERIOD_H4); TI(PERIOD_D1);
    if(c1 != PERIOD_CURRENT) TI(c1);
@@ -415,13 +452,14 @@ void OnTick()
       if(MQLInfoInteger(MQL_TESTER)) OnTimer();   // timers do not run before the first tick in the tester
       else return;
    }
+   DropClosed();
    bool newH4 = false;
    datetime h4 = iTime(_Symbol, PERIOD_H4, 0);
    if(h4 != lastH4) { lastH4 = h4; newH4 = true; UpdateEpisodes(); }
    for(int k = 0; k < 3; k++)
    {
       if(!S[k].on) continue;
-      Manage(S[k], newH4);
+      Manage(S[k], k, newH4);
       datetime b = iTime(_Symbol, S[k].tf, 0);
       if(b == S[k].lastBar) continue;
       S[k].lastBar = b;
@@ -429,9 +467,7 @@ void OnTick()
       int d = SignalAt(S[k], 1);
       if(d == 0) continue;
       double atr = B(hA[TI(S[k].tf)], 1), lvl = iClose(_Symbol, S[k].tf, 1);
-      ulong tk; int pd; double v, sl;
-      bool busy = GetPos(S[k], tk, pd, v, sl);
-      if(!busy) Open(S[k], d, lvl, atr);         // calibrate with signals known BEFORE this one
+      if(CanEnter(S[k], d)) Open(S[k], k, d, lvl, atr);   // calibrate with signals known BEFORE this one
       AddSig(S[k], b, d, lvl, atr);              // every signal feeds future calibration
    }
    if(ShowPanel)
