@@ -9,14 +9,14 @@
 //| Entry : EMA-stack pullback + higher-TF confluence + H4/D1 trend. |
 //+------------------------------------------------------------------+
 #property copyright "DTC research"
-#property version   "3.20"
+#property version   "3.30"
 #property strict
 #include <Trade/Trade.mqh>
 
 enum ADX_RULE { ADX_ANY = 0, ADX_LT30 = 1 };
-enum ENTRY_KIND { E_PB = 0, E_RSI2 = 1, E_BRK = 2 };
+enum ENTRY_KIND { E_PB = 0, E_RSI2 = 1, E_BRK = 2, E_RSIF = 3, E_ZF = 4, E_FBO = 5 };   // 3..5 = mean reversion (fade)
 enum RISK_MODE { RISK_DD_TREND = 0, RISK_DD_EDGE = 1, RISK_DD = 2, RISK_EDGE = 3, RISK_FIXED_MAX = 4 };
-#define NS 7
+#define NS 11
 
 input group "=== Common ==="
 input double MinRiskPercent   = 1.0;    // dynamic risk per trade: lowest % of equity
@@ -33,7 +33,7 @@ input int    MaxHoldDays      = 30;     // safety time exit
 input double MaxOpenRiskPercent = 15;   // cap on the summed risk of all open positions (positions with a stop in profit count as 0)
 input double ThrottleFullDD     = 20;   // risk slides from Max toward Min as equity falls below its peak; at this drawdown % it is MinRiskPercent
 input double MaxDrawdownStopPercent = 0; // hard stop for NEW trades at this drawdown % (0 = off; research: a hard stop hurt recovery)
-input int    MaxTotalPositions = 7;     // cap on open positions across all slots
+input int    MaxTotalPositions = 10;    // cap on open positions across all slots
 input int    MaxPositions     = 1;      // per slot. >1 = pyramiding: add only while all open positions are risk-free (hedging account)
 input double TP1FractionOverride = -1;  // -1 = use each slot's F1; 0.5 = close half at TP1; 0 = only lock the stop at TP1
 input int    BackfillDays     = 240;    // days of history scanned at start to calibrate (research used ~7 months)
@@ -52,6 +52,17 @@ input string Slot4 = "TF=M30;ENTRY=BRK;BRKN=20;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LO
 input string Slot5 = "TF=M5;ENTRY=PB;EMA=30;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.5;QTP=0.5;LOCK=0.25;QTR=0.5;F1=0.5";
 input string Slot6 = "TF=M3;ENTRY=RSI2;RSI=5;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.5;F1=0.5";
 input string Slot7 = "OFF;TF=M3;ENTRY=BRK;BRKN=20;CONF1=M15;CONF2=H1;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.8;F1=0";
+
+input group "=== Sideways / mean-reversion slots (fade stretched moves while the H4 trend is off) ==="
+// ENTRY=RSIF (RSI(2) below RSI= -> buy, above 100-RSI= -> sell) | ZF (close beyond Z= std devs of the 20-bar mean)
+//       | FBO (bar pierces the BRKN-bar extreme but closes back inside)
+// REG=NO4H: only while the H4 6-EMA stack is NOT aligned. Exit: full close at a market-measured target
+// (broker TP), market-measured stop, or after HOR minutes. No trailing, no DXY.
+input double MRRiskMult = 0.5;          // risk of a fade trade = normal dynamic risk x this (and it grows when the trend is WEAK)
+input string Slot8  = "TF=M15;ENTRY=RSIF;RSI=5;REG=NO4H;SESS=1;HOR=360;LOOK=60;QSL=0.7;QTP=0.5";
+input string Slot9  = "TF=H1;ENTRY=ZF;Z=2;REG=NO4H;SESS=0;HOR=720;LOOK=60;QSL=0.7;QTP=0.5";
+input string Slot10 = "TF=M30;ENTRY=ZF;Z=2.5;REG=NO4H;SESS=0;HOR=480;LOOK=60;QSL=0.7;QTP=0.5";
+input string Slot11 = "TF=H1;ENTRY=FBO;BRKN=20;REG=NO4H;SESS=1;HOR=720;LOOK=60;QSL=0.7;QTP=0.5";
 
 input group "=== Daily DXY (tighten runner trail when the dollar turns against gold) ==="
 input bool   UseDXY           = true;
@@ -75,7 +86,7 @@ struct Sig { datetime t; int dir; double lvl; double atr; double mae; double mfe
 
 struct Slot
 {
-   bool on; ENUM_TIMEFRAMES tf, c1, c2; int entry, pb, rsiTh, brkN, adx, horizon, look; bool sess; double qsl, qtp, lock, qtr, f1; ulong magic;
+   bool on, mr; ENUM_TIMEFRAMES tf, c1, c2; int entry, pb, rsiTh, brkN, adx, horizon, look, reg; bool sess; double qsl, qtp, lock, qtr, f1, zTh; ulong magic;
    Sig sigs[]; int nsig;
    datetime lastBar;
    // last calibrated values (for the panel)
@@ -137,8 +148,43 @@ bool InSessionUTC(datetime serverT)
 }
 
 //------------------------------------------------------------------ signal on bar `sh` of slot tf (bar close time T)
+// mean-reversion (fade) signal: no trend needed; optionally only while the H4 stack is not aligned
+int FadeSignalAt(Slot &s, int sh)
+{
+   datetime T = iTime(_Symbol, s.tf, sh) + PeriodSeconds(s.tf);
+   int i = TI(s.tf);
+   double h = iHigh(_Symbol, s.tf, sh), l = iLow(_Symbol, s.tf, sh), c = iClose(_Symbol, s.tf, sh);
+   int dir = 0;
+   if(s.entry == E_RSIF)
+   {
+      double r = B(hR[i], sh);
+      if(r == EMPTY_VALUE) return 0;
+      if(r < s.rsiTh) dir = 1; else if(r > 100 - s.rsiTh) dir = -1;
+   }
+   else if(s.entry == E_ZF)
+   {
+      double x[]; if(CopyClose(_Symbol, s.tf, sh, 20, x) != 20) return 0;
+      double m = 0, v = 0; for(int k = 0; k < 20; k++) m += x[k]; m /= 20;
+      for(int k = 0; k < 20; k++) v += (x[k] - m) * (x[k] - m);
+      double sd = MathSqrt(v / 19); if(sd <= 0) return 0;
+      double z = (c - m) / sd;
+      if(z < -s.zTh) dir = 1; else if(z > s.zTh) dir = -1;
+   }
+   else
+   {
+      int hi = iHighest(_Symbol, s.tf, MODE_HIGH, s.brkN, sh + 1), lo = iLowest(_Symbol, s.tf, MODE_LOW, s.brkN, sh + 1);
+      if(hi < 0 || lo < 0) return 0;
+      double hh = iHigh(_Symbol, s.tf, hi), ll = iLow(_Symbol, s.tf, lo);
+      if(h > hh && c < hh) dir = -1; else if(l < ll && c > ll) dir = 1;
+   }
+   if(dir == 0) return 0;
+   if(s.reg == 1 && StackAt(PERIOD_H4, ClosedShift(PERIOD_H4, T)) != 0) return 0;
+   if(s.sess && !InSessionUTC(T - 60)) return 0;
+   return dir;
+}
 int SignalAt(Slot &s, int sh)
 {
+   if(s.mr) return FadeSignalAt(s, sh);
    datetime T = iTime(_Symbol, s.tf, sh) + PeriodSeconds(s.tf);
    int st = StackAt(s.tf, sh);
    if(st == 0) return 0;
@@ -358,8 +404,8 @@ double RiskPctNow(Slot &s)
    else if(RiskMode == RISK_DD)    x = DDScore();
    else if(RiskMode == RISK_EDGE)  x = EdgeScore(s);
    else if(RiskMode == RISK_DD_EDGE) x = DDScore() * (0.5 + 0.5 * EdgeScore(s));
-   else                            x = DDScore() * TrendScore();
-   return mn + (mx - mn) * x;
+   else                            x = DDScore() * (s.mr ? 1.0 - TrendScore() : TrendScore());   // fades get more risk when the trend is weak
+   return (mn + (mx - mn) * x) * (s.mr ? MRRiskMult : 1.0);
 }
 
 //------------------------------------------------------------------ trading
@@ -413,10 +459,10 @@ bool CanEnter(Slot &s, int dir)
 }
 void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
 {
-   double k = MathMax(K_MIN, MathMin(K_MAX, SigQuantile(s, 0, s.qsl, 2.0)));
+   double k = MathMax(s.mr ? 0.3 : K_MIN, MathMin(K_MAX, SigQuantile(s, 0, s.qsl, 2.0)));
    double risk = k * atr;
    double r1 = 0;
-   if(s.qtp > 0) r1 = MathMax(R1_MIN, MathMin(R1_MAX, SigQuantile(s, 1, s.qtp, 1.0) / k));
+   if(s.qtp > 0) r1 = MathMax(R1_MIN, MathMin(s.mr ? 5.0 : R1_MAX, SigQuantile(s, 1, s.qtp, 1.0) / k));
    double tw = s.qtr > 0 ? TrailQuantile(s.qtr) * B(hA[TI(PERIOD_H4)], 1) : 0;
    if(UseDXY && tw > 0)
    {
@@ -446,13 +492,14 @@ void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
    if(lots <= 0) { Print("Slot ", slotIdx + 1, ": stop $", DoubleToString(risk, 2), " too wide for risk " + DoubleToString(riskPct, 2) + "% - skipped"); return; }
    trade.SetExpertMagicNumber(s.magic);
    double sl = NormalizeDouble(lvl - dir * risk, _Digits);
-   bool ok = dir == 1 ? trade.Buy(lots, _Symbol, 0, sl, 0, "DTC-dyn") : trade.Sell(lots, _Symbol, 0, sl, 0, "DTC-dyn");
+   double tp = s.mr && r1 > 0 ? NormalizeDouble(lvl + dir * r1 * risk, _Digits) : 0;   // fades: whole position at the target
+   bool ok = dir == 1 ? trade.Buy(lots, _Symbol, 0, sl, tp, s.mr ? "DTC-fade" : "DTC-dyn") : trade.Sell(lots, _Symbol, 0, sl, tp, s.mr ? "DTC-fade" : "DTC-dyn");
    if(ok && trade.ResultRetcode() == TRADE_RETCODE_DONE)
    {
       ArrayResize(PS, nPS + 1);
       PS[nPS].tk = trade.ResultOrder(); PS[nPS].slot = slotIdx; PS[nPS].dir = dir; PS[nPS].risk = risk; PS[nPS].lvl = lvl;
       PS[nPS].entry = trade.ResultPrice(); PS[nPS].best = trade.ResultPrice(); PS[nPS].trailW = tw; PS[nPS].r1 = r1;
-      PS[nPS].lock = s.lock; PS[nPS].tp1Done = (r1 <= 0); PS[nPS].openT = TimeCurrent();
+      PS[nPS].lock = s.lock; PS[nPS].tp1Done = (r1 <= 0) || s.mr; PS[nPS].openT = TimeCurrent();
       nPS++;
    }
 }
@@ -471,7 +518,7 @@ void ManagePosition(Slot &s, int slotIdx, ulong tk, bool newH4)
       ArrayResize(PS, nPS + 1); i = nPS++;
       PS[i].tk = tk; PS[i].slot = slotIdx; PS[i].dir = dir; PS[i].entry = op; PS[i].lvl = op; PS[i].risk = MathAbs(op - sl);
       PS[i].best = dir == 1 ? MathMax(op, px) : MathMin(op, px); PS[i].r1 = 0; PS[i].lock = s.lock;
-      PS[i].tp1Done = true;                                  // partial state unknown -> never partial-close again
+      PS[i].tp1Done = true;                                  // partial state unknown -> never partial-close again (fades keep their broker TP)
       PS[i].trailW = s.qtr > 0 ? TrailQuantile(s.qtr) * B(hA[TI(PERIOD_H4)], 1) : 0;
       PS[i].openT = (datetime)PositionGetInteger(POSITION_TIME);
    }
@@ -494,10 +541,11 @@ void ManagePosition(Slot &s, int slotIdx, ulong tk, bool newH4)
       if((dir == 1 && ns > nsl) || (dir == -1 && ns < nsl)) nsl = ns;
    }
    if(TimeCurrent() - PS[i].openT > MaxHoldDays * 86400) { trade.PositionClose(tk); return; }
+   if(s.mr && TimeCurrent() - PS[i].openT >= s.horizon * 60) { trade.PositionClose(tk); return; }   // fade did not work in time
    if(MathAbs(nsl - sl) > _Point)
    {
       double lvl = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
-      if((dir == 1 && nsl < bid - lvl) || (dir == -1 && nsl > ask + lvl)) trade.PositionModify(tk, NormalizeDouble(nsl, _Digits), 0);
+      if((dir == 1 && nsl < bid - lvl) || (dir == -1 && nsl > ask + lvl)) trade.PositionModify(tk, NormalizeDouble(nsl, _Digits), PositionGetDouble(POSITION_TP));
    }
 }
 void Manage(Slot &s, int slotIdx, bool newH4)
@@ -540,9 +588,12 @@ void Load(int k, string spec)
    if(!S[k].on) return;
    S[k].tf = ParseTF(SpecGet(sp, "TF", "M15"));
    string e = SpecGet(sp, "ENTRY", "PB");
-   S[k].entry = e == "RSI2" ? E_RSI2 : (e == "BRK" ? E_BRK : E_PB);
+   S[k].entry = e == "RSI2" ? E_RSI2 : e == "BRK" ? E_BRK : e == "RSIF" ? E_RSIF : e == "ZF" ? E_ZF : e == "FBO" ? E_FBO : E_PB;
+   S[k].mr = S[k].entry >= E_RSIF;
+   S[k].zTh = StringToDouble(SpecGet(sp, "Z", "2"));
+   S[k].reg = SpecGet(sp, "REG", "ANY") == "NO4H" ? 1 : 0;
    S[k].pb = (int)StringToInteger(SpecGet(sp, "EMA", "30"));
-   S[k].rsiTh = (int)StringToInteger(SpecGet(sp, "RSI", "10"));
+   S[k].rsiTh = (int)StringToInteger(SpecGet(sp, "RSI", S[k].mr ? "5" : "10"));
    S[k].brkN = (int)StringToInteger(SpecGet(sp, "BRKN", "20"));
    string c1 = SpecGet(sp, "CONF1", "NONE"), c2 = SpecGet(sp, "CONF2", "NONE");
    S[k].c1 = c1 == "NONE" ? PERIOD_CURRENT : ParseTF(c1);
@@ -555,8 +606,8 @@ void Load(int k, string spec)
    S[k].qsl = StringToDouble(SpecGet(sp, "QSL", "0.5"));
    S[k].qtp = StringToDouble(SpecGet(sp, "QTP", "0.3"));
    S[k].lock = StringToDouble(SpecGet(sp, "LOCK", "0.25"));
-   S[k].qtr = StringToDouble(SpecGet(sp, "QTR", "0.8"));
-   S[k].f1 = StringToDouble(SpecGet(sp, "F1", "0.5"));
+   S[k].qtr = S[k].mr ? 0 : StringToDouble(SpecGet(sp, "QTR", "0.8"));
+   S[k].f1 = S[k].mr ? 1 : StringToDouble(SpecGet(sp, "F1", "0.5"));
    TI(S[k].tf); TI(PERIOD_H4); TI(PERIOD_D1);
    if(S[k].c1 != PERIOD_CURRENT) TI(S[k].c1);
    if(S[k].c2 != PERIOD_CURRENT) TI(S[k].c2);
@@ -584,6 +635,7 @@ void Backfill(Slot &s)
 int OnInit()
 {
    Load(0, Slot1); Load(1, Slot2); Load(2, Slot3); Load(3, Slot4); Load(4, Slot5); Load(5, Slot6); Load(6, Slot7);
+   Load(7, Slot8); Load(8, Slot9); Load(9, Slot10); Load(10, Slot11);
    EventSetTimer(5);          // indicators need a moment to build before the backfill
    return INIT_SUCCEEDED;
 }
@@ -625,7 +677,7 @@ void OnTick()
    }
    if(ShowPanel)
    {
-      string txt = StringFormat("DTC Gold Dynamic | drawdown %.1f%% | gold trend strength %.2f\n", CurrentDrawdown() * 100.0, TrendScore());
+      string txt = StringFormat("DTC Gold Dynamic (trend + fade) | drawdown %.1f%% | gold trend strength %.2f\n", CurrentDrawdown() * 100.0, TrendScore());
       for(int k = 0; k < NS; k++) if(S[k].on)
          txt += StringFormat("Slot %d %s | signals %d | last SL %.2f ATR, TP1 %.2f R, trail $%.1f | risk now %.2f%%\n",
                              k + 1, EnumToString(S[k].tf), S[k].nsig, S[k].kNow, S[k].r1Now, S[k].trNow, RiskPctNow(S[k]));
