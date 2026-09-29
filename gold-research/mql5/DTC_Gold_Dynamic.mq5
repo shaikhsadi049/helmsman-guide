@@ -616,7 +616,7 @@ void Load(int k, string spec)
 void Backfill(Slot &s)
 {
    // scan from the newest closed bar backwards and stop once enough signals are collected (fast start, same calibration)
-   int n = (int)MathMin((long)BackfillDays * 86400 / PeriodSeconds(s.tf), Bars(_Symbol, s.tf) - 80);
+   int n = (int)MathMin((double)BackfillDays * 86400.0 / PeriodSeconds(s.tf), (double)(Bars(_Symbol, s.tf) - 80));
    int need = MathMin(MAX_SIGS, s.look * 3);
    datetime tT[]; int tD[]; double tL[], tA[]; int c = 0;
    ArrayResize(tT, need); ArrayResize(tD, need); ArrayResize(tL, need); ArrayResize(tA, need);
