@@ -23,6 +23,7 @@ input double FixedLots        = 0.01;   // used when RiskPercent = 0
 input double MaxSpreadPoints  = 80;     // skip entries when spread is wider (points)
 input int    ServerUTCOffset  = 2;      // broker server time minus UTC, hours
 input int    MaxHoldDays      = 30;     // safety time exit
+input int    MaxTotalPositions = 7;     // cap on open positions across all slots
 input int    MaxPositions     = 1;      // per slot. >1 = pyramiding: add only while all open positions are risk-free (hedging account)
 input double TP1FractionOverride = -1;  // -1 = use each slot's F1; 0.5 = close half at TP1; 0 = only lock the stop at TP1
 input int    BackfillDays     = 240;    // days of history scanned at start to calibrate (research used ~7 months)
@@ -308,6 +309,10 @@ bool CanEnter(Slot &s, int dir)
 {
    int d; bool locked;
    int c = SlotPositions(s, d, locked);
+   int total = 0;
+   for(int k = PositionsTotal() - 1; k >= 0; k--)
+   { PositionGetTicket(k); long mg = PositionGetInteger(POSITION_MAGIC); if(PositionGetString(POSITION_SYMBOL) == _Symbol && mg >= (long)MagicBase && mg < (long)MagicBase + NS) total++; }
+   if(total >= MaxTotalPositions) return false;
    if(c == 0) return true;
    return c < MaxPositions && locked && d == dir;
 }
@@ -447,15 +452,20 @@ void Load(int k, string spec)
 }
 void Backfill(Slot &s)
 {
+   // scan from the newest closed bar backwards and stop once enough signals are collected (fast start, same calibration)
    int n = (int)MathMin((long)BackfillDays * 86400 / PeriodSeconds(s.tf), Bars(_Symbol, s.tf) - 80);
-   for(int sh = n; sh >= 2; sh--)
+   int need = MathMin(MAX_SIGS, s.look * 3);
+   datetime tT[]; int tD[]; double tL[], tA[]; int c = 0;
+   ArrayResize(tT, need); ArrayResize(tD, need); ArrayResize(tL, need); ArrayResize(tA, need);
+   for(int sh = 2; sh <= n && c < need; sh++)
    {
       int d = SignalAt(s, sh);
       if(d == 0) continue;
       double atr = B(hA[TI(s.tf)], sh);
       if(atr == EMPTY_VALUE || atr <= 0) continue;
-      AddSig(s, iTime(_Symbol, s.tf, sh) + PeriodSeconds(s.tf), d, iClose(_Symbol, s.tf, sh), atr);
+      tT[c] = iTime(_Symbol, s.tf, sh) + PeriodSeconds(s.tf); tD[c] = d; tL[c] = iClose(_Symbol, s.tf, sh); tA[c] = atr; c++;
    }
+   for(int k = c - 1; k >= 0; k--) AddSig(s, tT[k], tD[k], tL[k], tA[k]);   // oldest first
    Resolve(s, TimeCurrent());
    PrintFormat("Slot %d (%s): %d historical signals calibrated", (int)(s.magic - MagicBase + 1), EnumToString(s.tf), s.nsig);
 }
