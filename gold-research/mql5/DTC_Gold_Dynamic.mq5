@@ -23,6 +23,10 @@ input double FixedLots        = 0.01;   // used when RiskPercent = 0
 input double MaxSpreadPoints  = 80;     // skip entries when spread is wider (points)
 input int    ServerUTCOffset  = 2;      // broker server time minus UTC, hours
 input int    MaxHoldDays      = 30;     // safety time exit
+input double MaxOpenRiskPercent = 15;   // cap on the summed risk of all open positions (positions with a stop in profit count as 0)
+input double ThrottleFullDD     = 20;   // risk shrinks linearly as equity falls below its peak; at this drawdown % it reaches the floor
+input double ThrottleFloor      = 0.1;  // lowest share of RiskPercent used deep in drawdown (0.1 = 10%)
+input double MaxDrawdownStopPercent = 0; // hard stop for NEW trades at this drawdown % (0 = off; research: a hard stop hurt recovery)
 input int    MaxTotalPositions = 7;     // cap on open positions across all slots
 input int    MaxPositions     = 1;      // per slot. >1 = pyramiding: add only while all open positions are risk-free (hedging account)
 input double TP1FractionOverride = -1;  // -1 = use each slot's F1; 0.5 = close half at TP1; 0 = only lock the stop at TP1
@@ -267,6 +271,53 @@ int UsdDailyDir()
    return e20 > e50 ? 1 : -1;
 }
 
+
+//------------------------------------------------------------------ account-level risk guards
+double MoneyPerPriceUnit(double lots)
+{
+   double tv = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE), ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   return ts > 0 ? lots * tv / ts : 0;
+}
+// % of equity that would be lost if every open position of this EA hit its stop now
+double OpenRiskPercent()
+{
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY), risk = 0;
+   if(eq <= 0) return 100;
+   for(int k = PositionsTotal() - 1; k >= 0; k--)
+   {
+      PositionGetTicket(k);
+      long mg = PositionGetInteger(POSITION_MAGIC);
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol || mg < (long)MagicBase || mg >= (long)MagicBase + NS) continue;
+      int d = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 1 : -1;
+      double sl = PositionGetDouble(POSITION_SL), op = PositionGetDouble(POSITION_PRICE_OPEN), v = PositionGetDouble(POSITION_VOLUME);
+      if(sl <= 0) { risk += eq; continue; }                      // no stop = unlimited risk
+      double lossPts = (op - sl) * d;                            // <= 0 when the stop is already in profit
+      if(lossPts > 0) risk += lossPts * MoneyPerPriceUnit(v);
+   }
+   return risk / eq * 100.0;
+}
+// equity peak persists across restarts in a terminal global variable
+double CurrentDrawdown()
+{
+   string key = "DTCDYN_PEAK_" + _Symbol + "_" + IntegerToString((long)MagicBase);
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   double peak = GlobalVariableCheck(key) ? GlobalVariableGet(key) : eq;
+   if(eq > peak) peak = eq;
+   GlobalVariableSet(key, peak);
+   return peak > 0 ? 1.0 - eq / peak : 0;
+}
+bool DrawdownStopActive()
+{
+   if(MaxDrawdownStopPercent <= 0) return false;
+   return CurrentDrawdown() * 100.0 > MaxDrawdownStopPercent;
+}
+// share of RiskPercent to use now: 1 at the equity peak, falling linearly to ThrottleFloor at ThrottleFullDD
+double RiskThrottle()
+{
+   if(ThrottleFullDD <= 0) return 1.0;
+   return MathMax(ThrottleFloor, 1.0 - CurrentDrawdown() * 100.0 / ThrottleFullDD);
+}
+
 //------------------------------------------------------------------ trading
 double Lots(double stopDist)
 {
@@ -274,7 +325,7 @@ double Lots(double stopDist)
    if(RiskPercent <= 0) return MathMax(mn, FixedLots);
    double tv = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE), ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    if(tv <= 0 || ts <= 0 || stopDist <= 0) return 0;
-   double lots = AccountInfoDouble(ACCOUNT_EQUITY) * RiskPercent / 100.0 / (stopDist / ts * tv);
+   double lots = AccountInfoDouble(ACCOUNT_EQUITY) * RiskPercent * RiskThrottle() / 100.0 / (stopDist / ts * tv);
    lots = MathFloor(lots / step) * step;
    if(lots < mn) return 0;                 // risk too small for the minimum lot -> skip rather than over-risk
    return MathMin(mx, lots);
@@ -330,7 +381,22 @@ void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
    }
    s.kNow = k; s.r1Now = r1; s.trNow = tw;
    if((SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point > MaxSpreadPoints) return;
+   if(DrawdownStopActive()) { Print("Drawdown stop active: equity is more than ", MaxDrawdownStopPercent, "% below its peak - no new trades"); return; }
    double lots = Lots(risk);
+   if(lots > 0 && RiskPercent > 0)
+   {
+      // shrink (or skip) the trade so the summed open risk stays under MaxOpenRiskPercent
+      double room = MaxOpenRiskPercent - OpenRiskPercent();
+      double thisRisk = risk * MoneyPerPriceUnit(lots) / AccountInfoDouble(ACCOUNT_EQUITY) * 100.0;
+      if(room <= 0) lots = 0;
+      else if(thisRisk > room)
+      {
+         double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+         lots = MathFloor(lots * room / thisRisk / step) * step;
+         if(lots < SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN)) lots = 0;
+      }
+      if(lots <= 0) { Print("Slot ", slotIdx + 1, ": open-risk cap ", MaxOpenRiskPercent, "% reached - skipped"); return; }
+   }
    if(lots <= 0) { Print("Slot ", slotIdx + 1, ": stop $", DoubleToString(risk, 2), " too wide for RiskPercent - skipped"); return; }
    trade.SetExpertMagicNumber(s.magic);
    double sl = NormalizeDouble(lvl - dir * risk, _Digits);
