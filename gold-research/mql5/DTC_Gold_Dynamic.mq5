@@ -21,6 +21,7 @@ input double FixedLots        = 0.01;   // used when RiskPercent = 0
 input double MaxSpreadPoints  = 80;     // skip entries when spread is wider (points)
 input int    ServerUTCOffset  = 2;      // broker server time minus UTC, hours
 input int    MaxHoldDays      = 30;     // safety time exit
+input double TP1Fraction      = 0.5;    // share closed at TP1. 0.5 = smoother equity; 0 = only lock the stop at TP1 (more total profit, bumpier)
 input int    BackfillDays     = 240;    // days of history scanned at start to calibrate (research used ~7 months)
 input ulong  MagicBase        = 881000;
 input bool   ShowPanel        = true;
@@ -78,7 +79,6 @@ input int SessFromUTC = 7;
 input int SessToUTC   = 20;
 
 //--- constants of the method (same as the research)
-#define TP1_FRACTION   0.5
 #define K_MIN          0.5
 #define K_MAX          8.0
 #define R1_MIN         0.2
@@ -325,13 +325,25 @@ void Manage(Slot &s, bool newH4)
    ulong tk; int dir; double vol, sl;
    if(!GetPos(s, tk, dir, vol, sl)) return;
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK), px = dir == 1 ? bid : ask;
+   if(s.risk <= 0 || s.openT == 0)
+   {
+      // EA (re)started with a position already open: rebuild the trade state from the position itself
+      s.entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      s.openT = (datetime)PositionGetInteger(POSITION_TIME);
+      s.lvl = s.entry;
+      s.risk = sl > 0 ? MathAbs(s.entry - sl) : 0;
+      s.best = dir == 1 ? MathMax(s.entry, px) : MathMin(s.entry, px);
+      s.tp1Done = true;                                  // partial state unknown -> do not partial-close again
+      s.trailW = s.qtr > 0 ? TrailQuantile(s.qtr) * B(hA[TI(PERIOD_H4)], 1) : 0;
+      if(s.risk <= 0) return;
+   }
    s.best = dir == 1 ? MathMax(s.best, px) : MathMin(s.best, px);
    trade.SetExpertMagicNumber(s.magic);
    double nsl = sl;
    if(!s.tp1Done && s.risk > 0 && (px - s.lvl) * dir >= s.r1Now * s.risk)
    {
       double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-      double part = MathFloor(vol * TP1_FRACTION / step) * step;
+      double part = MathFloor(vol * TP1Fraction / step) * step;
       if(part >= SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN) && part < vol) trade.PositionClosePartial(tk, part);
       s.tp1Done = true;
       double lk = s.entry + dir * s.lock * s.risk;
@@ -357,6 +369,7 @@ void Load(int k, bool on, ENUM_TIMEFRAMES tf, int pb, ENUM_TIMEFRAMES c1, ENUM_T
    S[k].on = on; S[k].tf = tf; S[k].pb = pb; S[k].c1 = c1; S[k].c2 = c2; S[k].adx = adx; S[k].horizon = hor; S[k].look = look;
    S[k].qsl = qsl; S[k].qtp = qtp; S[k].lock = lock; S[k].qtr = qtr; S[k].magic = MagicBase + k; S[k].nsig = 0; S[k].lastBar = 0;
    S[k].tp1Done = true; S[k].kNow = 0; S[k].r1Now = 0; S[k].trNow = 0;
+   S[k].risk = 0; S[k].openT = 0; S[k].best = 0; S[k].trailW = 0; S[k].entry = 0; S[k].lvl = 0;
    ArrayResize(S[k].sigs, 0);
    TI(tf); TI(PERIOD_H4); TI(PERIOD_D1);
    if(c1 != PERIOD_CURRENT) TI(c1);
