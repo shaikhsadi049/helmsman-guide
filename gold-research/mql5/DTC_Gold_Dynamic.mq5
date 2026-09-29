@@ -9,11 +9,13 @@
 //| Entry : EMA-stack pullback + higher-TF confluence + H4/D1 trend. |
 //+------------------------------------------------------------------+
 #property copyright "DTC research"
-#property version   "2.00"
+#property version   "3.00"
 #property strict
 #include <Trade/Trade.mqh>
 
 enum ADX_RULE { ADX_ANY = 0, ADX_LT30 = 1 };
+enum ENTRY_KIND { E_PB = 0, E_RSI2 = 1, E_BRK = 2 };
+#define NS 7
 
 input group "=== Common ==="
 input double RiskPercent      = 0.5;    // risk per trade, % of equity (0 = use FixedLots)
@@ -22,52 +24,23 @@ input double MaxSpreadPoints  = 80;     // skip entries when spread is wider (po
 input int    ServerUTCOffset  = 2;      // broker server time minus UTC, hours
 input int    MaxHoldDays      = 30;     // safety time exit
 input int    MaxPositions     = 1;      // per slot. >1 = pyramiding: add only while all open positions are risk-free (hedging account)
-input double TP1Fraction      = 0.5;    // share closed at TP1. 0.5 = smoother equity; 0 = only lock the stop at TP1 (more total profit, bumpier)
+input double TP1FractionOverride = -1;  // -1 = use each slot's F1; 0.5 = close half at TP1; 0 = only lock the stop at TP1
 input int    BackfillDays     = 240;    // days of history scanned at start to calibrate (research used ~7 months)
 input ulong  MagicBase        = 881000;
 input bool   ShowPanel        = true;
 
-input group "=== Slot 1: 5m pullback (15m+1H confluence) ==="
-input bool            S1_On      = true;
-input ENUM_TIMEFRAMES S1_TF      = PERIOD_M5;
-input int             S1_PbEMA   = 30;
-input ENUM_TIMEFRAMES S1_Conf1   = PERIOD_M15;
-input ENUM_TIMEFRAMES S1_Conf2   = PERIOD_H1;
-input ADX_RULE        S1_Adx     = ADX_ANY;
-input int             S1_Horizon = 1440;    // minutes used to measure a signal's excursions
-input int             S1_Look    = 60;      // how many recent signals calibrate the constants
-input double          S1_qSL     = 0.50;
-input double          S1_qTP     = 0.50;    // 0 = no TP1
-input double          S1_Lock    = 0.25;
-input double          S1_qTR     = 0.80;    // 0 = no trail
-
-input group "=== Slot 2: 15m pullback (1H confluence, ADX<30) ==="
-input bool            S2_On      = true;
-input ENUM_TIMEFRAMES S2_TF      = PERIOD_M15;
-input int             S2_PbEMA   = 40;
-input ENUM_TIMEFRAMES S2_Conf1   = PERIOD_H1;
-input ENUM_TIMEFRAMES S2_Conf2   = PERIOD_CURRENT;
-input ADX_RULE        S2_Adx     = ADX_LT30;
-input int             S2_Horizon = 1440;
-input int             S2_Look    = 60;
-input double          S2_qSL     = 0.50;
-input double          S2_qTP     = 0.50;
-input double          S2_Lock    = 0.25;
-input double          S2_qTR     = 0.80;
-
-input group "=== Slot 3: 1H pullback ==="
-input bool            S3_On      = true;
-input ENUM_TIMEFRAMES S3_TF      = PERIOD_H1;
-input int             S3_PbEMA   = 40;
-input ENUM_TIMEFRAMES S3_Conf1   = PERIOD_CURRENT;
-input ENUM_TIMEFRAMES S3_Conf2   = PERIOD_CURRENT;
-input ADX_RULE        S3_Adx     = ADX_ANY;
-input int             S3_Horizon = 4320;
-input int             S3_Look    = 30;
-input double          S3_qSL     = 0.50;
-input double          S3_qTP     = 0.30;
-input double          S3_Lock    = 0.25;
-input double          S3_qTR     = 0.50;
+input group "=== Strategy slots (spec string, or OFF) ==="
+// Keys: TF=M3|M5|M15|M30|H1  ENTRY=PB|RSI2|BRK  EMA=30|40|60 (PB)  RSI=10|5 (RSI2)  BRKN=20 (BRK)
+//       CONF1/CONF2=NONE|M15|H1|H4 (higher-TF EMA stack must agree)  ADX=ANY|LT30  SESS=1|0
+//       LOOK (signals used for calibration)  QSL QTP QTR (quantiles)  LOCK (R)  F1 (share closed at TP1)
+// Defaults = the 7-strategy portfolio from the research (steps 1..7). Use OFF to disable a slot.
+input string Slot1 = "TF=M30;ENTRY=PB;EMA=30;CONF1=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.3;LOCK=0.25;QTR=0.8;F1=0";
+input string Slot2 = "TF=M15;ENTRY=BRK;BRKN=20;CONF1=H1;CONF2=H4;SESS=0;LOOK=60;QSL=0.5;QTP=0.2;LOCK=0.1;QTR=0.8;F1=0";
+input string Slot3 = "TF=M3;ENTRY=RSI2;RSI=10;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.5;F1=0.5";
+input string Slot4 = "TF=M30;ENTRY=BRK;BRKN=20;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.25;QTR=0.8;F1=0";
+input string Slot5 = "TF=M5;ENTRY=PB;EMA=30;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.5;QTP=0.5;LOCK=0.25;QTR=0.5;F1=0.5";
+input string Slot6 = "TF=M3;ENTRY=RSI2;RSI=5;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.5;F1=0.5";
+input string Slot7 = "TF=M3;ENTRY=BRK;BRKN=20;CONF1=M15;CONF2=H1;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.8;F1=0";
 
 input group "=== Daily DXY (tighten runner trail when the dollar turns against gold) ==="
 input bool   UseDXY           = true;
@@ -82,7 +55,7 @@ input int SessToUTC   = 20;
 //--- constants of the method (same as the research)
 #define K_MIN          0.5
 #define K_MAX          8.0
-#define R1_MIN         0.2
+#define R1_MIN         0.1
 #define R1_MAX         3.0
 #define EPISODES       20
 #define MAX_SIGS       400
@@ -91,18 +64,18 @@ struct Sig { datetime t; int dir; double lvl; double atr; double mae; double mfe
 
 struct Slot
 {
-   bool on; ENUM_TIMEFRAMES tf, c1, c2; int pb, adx, horizon, look; double qsl, qtp, lock, qtr; ulong magic;
+   bool on; ENUM_TIMEFRAMES tf, c1, c2; int entry, pb, rsiTh, brkN, adx, horizon, look; bool sess; double qsl, qtp, lock, qtr, f1; ulong magic;
    Sig sigs[]; int nsig;
    datetime lastBar;
    // last calibrated values (for the panel)
    double kNow, r1Now, trNow;
 };
-Slot S[3];
+Slot S[NS];
 CTrade trade;
 double epDepth[]; int nEp = 0; datetime lastH4 = 0;
 
 //------------------------------------------------------------------ indicator helpers
-int hE[7][12]; int hA[12], hX[12], h20[12], h50[12]; ENUM_TIMEFRAMES tfL[12]; int nTf = 0;
+int hE[7][12]; int hA[12], hX[12], h20[12], h50[12], hR[12]; ENUM_TIMEFRAMES tfL[12]; int nTf = 0;
 const int EL[7] = {30, 35, 40, 45, 50, 60, 20};
 
 int TI(ENUM_TIMEFRAMES tf)
@@ -112,6 +85,7 @@ int TI(ENUM_TIMEFRAMES tf)
    for(int k = 0; k < 6; k++) hE[k][i] = iMA(_Symbol, tf, EL[k], 0, MODE_EMA, PRICE_CLOSE);
    hA[i] = iATR(_Symbol, tf, 14);
    hX[i] = iADXWilder(_Symbol, tf, 14);
+   hR[i] = iRSI(_Symbol, tf, 2, PRICE_CLOSE);
    h20[i] = iMA(_Symbol, tf, 20, 0, MODE_EMA, PRICE_CLOSE);
    h50[i] = iMA(_Symbol, tf, 50, 0, MODE_EMA, PRICE_CLOSE);
    return i;
@@ -158,18 +132,38 @@ int SignalAt(Slot &s, int sh)
    int st = StackAt(s.tf, sh);
    if(st == 0) return 0;
    int i = TI(s.tf);
-   int pbk = s.pb == 40 ? 2 : (s.pb == 60 ? 5 : 0);
-   double ePb = B(hE[pbk][i], sh), e30 = B(hE[0][i], sh);
    double o = iOpen(_Symbol, s.tf, sh), h = iHigh(_Symbol, s.tf, sh), l = iLow(_Symbol, s.tf, sh), c = iClose(_Symbol, s.tf, sh);
    int dir = 0;
-   if(st == 1 && l <= ePb && c > e30 && c > o) dir = 1;
-   if(st == -1 && h >= ePb && c < e30 && c < o) dir = -1;
+   if(s.entry == E_PB)
+   {
+      // stack aligned, bar dips into EMA(pb) and closes back beyond EMA30 in trend direction
+      int pbk = s.pb == 40 ? 2 : (s.pb == 60 ? 5 : 0);
+      double ePb = B(hE[pbk][i], sh), e30 = B(hE[0][i], sh);
+      if(st == 1 && l <= ePb && c > e30 && c > o) dir = 1;
+      if(st == -1 && h >= ePb && c < e30 && c < o) dir = -1;
+   }
+   else if(s.entry == E_RSI2)
+   {
+      // short-term exhaustion against the trend: RSI(2) below th (long) / above 100-th (short)
+      double r = B(hR[i], sh);
+      if(r == EMPTY_VALUE) return 0;
+      if(st == 1 && r < s.rsiTh) dir = 1;
+      if(st == -1 && r > 100 - s.rsiTh) dir = -1;
+   }
+   else
+   {
+      // close beyond the extreme of the previous brkN bars in trend direction
+      int hi = iHighest(_Symbol, s.tf, MODE_HIGH, s.brkN, sh + 1), lo = iLowest(_Symbol, s.tf, MODE_LOW, s.brkN, sh + 1);
+      if(hi < 0 || lo < 0) return 0;
+      if(st == 1 && c > iHigh(_Symbol, s.tf, hi)) dir = 1;
+      if(st == -1 && c < iLow(_Symbol, s.tf, lo)) dir = -1;
+   }
    if(dir == 0) return 0;
    if(HtfDirAt(PERIOD_H4, T) != dir || HtfDirAt(PERIOD_D1, T) != dir) return 0;
    if(s.c1 != PERIOD_CURRENT && StackAt(s.c1, ClosedShift(s.c1, T)) != dir) return 0;
    if(s.c2 != PERIOD_CURRENT && StackAt(s.c2, ClosedShift(s.c2, T)) != dir) return 0;
    if(s.adx == ADX_LT30) { double a = B(hX[i], sh); if(!(a < 30)) return 0; }
-   if(!InSessionUTC(T - 60)) return 0;
+   if(s.sess && !InSessionUTC(T - 60)) return 0;
    return dir;
 }
 
@@ -370,7 +364,8 @@ void ManagePosition(Slot &s, int slotIdx, ulong tk, bool newH4)
    if(!PS[i].tp1Done && PS[i].risk > 0 && (px - PS[i].lvl) * dir >= PS[i].r1 * PS[i].risk)
    {
       double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-      double part = MathFloor(vol * TP1Fraction / step) * step;
+      double frac = TP1FractionOverride >= 0 ? TP1FractionOverride : s.f1;
+      double part = MathFloor(vol * frac / step) * step;
       if(part >= SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN) && part < vol) trade.PositionClosePartial(tk, part);
       PS[i].tp1Done = true;
       double lk = PS[i].entry + dir * PS[i].lock * PS[i].risk;
@@ -401,16 +396,54 @@ void Manage(Slot &s, int slotIdx, bool newH4)
 }
 
 //------------------------------------------------------------------ setup
-void Load(int k, bool on, ENUM_TIMEFRAMES tf, int pb, ENUM_TIMEFRAMES c1, ENUM_TIMEFRAMES c2, int adx, int hor, int look,
-          double qsl, double qtp, double lock, double qtr)
+ENUM_TIMEFRAMES ParseTF(string v)
 {
-   S[k].on = on; S[k].tf = tf; S[k].pb = pb; S[k].c1 = c1; S[k].c2 = c2; S[k].adx = adx; S[k].horizon = hor; S[k].look = look;
-   S[k].qsl = qsl; S[k].qtp = qtp; S[k].lock = lock; S[k].qtr = qtr; S[k].magic = MagicBase + k; S[k].nsig = 0; S[k].lastBar = 0;
-   S[k].kNow = 0; S[k].r1Now = 0; S[k].trNow = 0;
+   if(v == "M1") return PERIOD_M1; if(v == "M3") return PERIOD_M3; if(v == "M5") return PERIOD_M5; if(v == "M15") return PERIOD_M15;
+   if(v == "M30") return PERIOD_M30; if(v == "H1") return PERIOD_H1; if(v == "H4") return PERIOD_H4; if(v == "D1") return PERIOD_D1;
+   return PERIOD_CURRENT;
+}
+string SpecGet(string spec, string key, string def)
+{
+   string parts[]; int n = StringSplit(spec, ';', parts);
+   for(int k = 0; k < n; k++)
+   {
+      string kv[]; if(StringSplit(parts[k], '=', kv) != 2) continue;
+      StringTrimLeft(kv[0]); StringTrimRight(kv[0]); StringTrimLeft(kv[1]); StringTrimRight(kv[1]);
+      StringToUpper(kv[0]);
+      if(kv[0] == key) { string v = kv[1]; StringToUpper(v); return v; }
+   }
+   return def;
+}
+void Load(int k, string spec)
+{
+   string sp = spec; StringTrimLeft(sp); StringTrimRight(sp); string up = sp; StringToUpper(up);
+   S[k].on = !(up == "" || up == "OFF");
+   S[k].magic = MagicBase + k; S[k].nsig = 0; S[k].lastBar = 0; S[k].kNow = 0; S[k].r1Now = 0; S[k].trNow = 0;
    ArrayResize(S[k].sigs, 0);
-   TI(tf); TI(PERIOD_H4); TI(PERIOD_D1);
-   if(c1 != PERIOD_CURRENT) TI(c1);
-   if(c2 != PERIOD_CURRENT) TI(c2);
+   if(!S[k].on) return;
+   S[k].tf = ParseTF(SpecGet(sp, "TF", "M15"));
+   string e = SpecGet(sp, "ENTRY", "PB");
+   S[k].entry = e == "RSI2" ? E_RSI2 : (e == "BRK" ? E_BRK : E_PB);
+   S[k].pb = (int)StringToInteger(SpecGet(sp, "EMA", "30"));
+   S[k].rsiTh = (int)StringToInteger(SpecGet(sp, "RSI", "10"));
+   S[k].brkN = (int)StringToInteger(SpecGet(sp, "BRKN", "20"));
+   string c1 = SpecGet(sp, "CONF1", "NONE"), c2 = SpecGet(sp, "CONF2", "NONE");
+   S[k].c1 = c1 == "NONE" ? PERIOD_CURRENT : ParseTF(c1);
+   S[k].c2 = c2 == "NONE" ? PERIOD_CURRENT : ParseTF(c2);
+   S[k].adx = SpecGet(sp, "ADX", "ANY") == "LT30" ? ADX_LT30 : ADX_ANY;
+   S[k].sess = SpecGet(sp, "SESS", "1") == "1";
+   int defHor = S[k].tf <= PERIOD_M3 ? 720 : (S[k].tf <= PERIOD_M15 ? 1440 : (S[k].tf <= PERIOD_M30 ? 2880 : 4320));
+   S[k].horizon = (int)StringToInteger(SpecGet(sp, "HOR", IntegerToString(defHor)));
+   S[k].look = (int)StringToInteger(SpecGet(sp, "LOOK", "60"));
+   S[k].qsl = StringToDouble(SpecGet(sp, "QSL", "0.5"));
+   S[k].qtp = StringToDouble(SpecGet(sp, "QTP", "0.3"));
+   S[k].lock = StringToDouble(SpecGet(sp, "LOCK", "0.25"));
+   S[k].qtr = StringToDouble(SpecGet(sp, "QTR", "0.8"));
+   S[k].f1 = StringToDouble(SpecGet(sp, "F1", "0.5"));
+   TI(S[k].tf); TI(PERIOD_H4); TI(PERIOD_D1);
+   if(S[k].c1 != PERIOD_CURRENT) TI(S[k].c1);
+   if(S[k].c2 != PERIOD_CURRENT) TI(S[k].c2);
+   PrintFormat("Slot %d: %s", k + 1, sp);
 }
 void Backfill(Slot &s)
 {
@@ -428,9 +461,7 @@ void Backfill(Slot &s)
 }
 int OnInit()
 {
-   Load(0, S1_On, S1_TF, S1_PbEMA, S1_Conf1, S1_Conf2, S1_Adx, S1_Horizon, S1_Look, S1_qSL, S1_qTP, S1_Lock, S1_qTR);
-   Load(1, S2_On, S2_TF, S2_PbEMA, S2_Conf1, S2_Conf2, S2_Adx, S2_Horizon, S2_Look, S2_qSL, S2_qTP, S2_Lock, S2_qTR);
-   Load(2, S3_On, S3_TF, S3_PbEMA, S3_Conf1, S3_Conf2, S3_Adx, S3_Horizon, S3_Look, S3_qSL, S3_qTP, S3_Lock, S3_qTR);
+   Load(0, Slot1); Load(1, Slot2); Load(2, Slot3); Load(3, Slot4); Load(4, Slot5); Load(5, Slot6); Load(6, Slot7);
    EventSetTimer(5);          // indicators need a moment to build before the backfill
    return INIT_SUCCEEDED;
 }
@@ -438,7 +469,7 @@ bool ready = false;
 void OnTimer()
 {
    if(ready) return;
-   for(int k = 0; k < 3; k++) if(S[k].on) Backfill(S[k]);
+   for(int k = 0; k < NS; k++) if(S[k].on) Backfill(S[k]);
    UpdateEpisodes();
    ready = true;
    EventKillTimer();
@@ -456,7 +487,7 @@ void OnTick()
    bool newH4 = false;
    datetime h4 = iTime(_Symbol, PERIOD_H4, 0);
    if(h4 != lastH4) { lastH4 = h4; newH4 = true; UpdateEpisodes(); }
-   for(int k = 0; k < 3; k++)
+   for(int k = 0; k < NS; k++)
    {
       if(!S[k].on) continue;
       Manage(S[k], k, newH4);
@@ -472,8 +503,8 @@ void OnTick()
    }
    if(ShowPanel)
    {
-      string txt = "DTC Gold Dynamic\n";
-      for(int k = 0; k < 3; k++) if(S[k].on)
+      string txt = "DTC Gold Dynamic (7 slots)\n";
+      for(int k = 0; k < NS; k++) if(S[k].on)
          txt += StringFormat("Slot %d %s | signals %d | last SL %.2f ATR, TP1 %.2f R, trail $%.1f\n",
                              k + 1, EnumToString(S[k].tf), S[k].nsig, S[k].kNow, S[k].r1Now, S[k].trNow);
       Comment(txt);
