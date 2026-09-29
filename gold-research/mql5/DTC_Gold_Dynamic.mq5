@@ -9,23 +9,27 @@
 //| Entry : EMA-stack pullback + higher-TF confluence + H4/D1 trend. |
 //+------------------------------------------------------------------+
 #property copyright "DTC research"
-#property version   "3.00"
+#property version   "3.10"
 #property strict
 #include <Trade/Trade.mqh>
 
 enum ADX_RULE { ADX_ANY = 0, ADX_LT30 = 1 };
 enum ENTRY_KIND { E_PB = 0, E_RSI2 = 1, E_BRK = 2 };
+enum RISK_MODE { RISK_DD_EDGE = 0, RISK_DD = 1, RISK_EDGE = 2, RISK_FIXED_MAX = 3 };
 #define NS 7
 
 input group "=== Common ==="
-input double RiskPercent      = 0.5;    // risk per trade, % of equity (0 = use FixedLots)
-input double FixedLots        = 0.01;   // used when RiskPercent = 0
+input double MinRiskPercent   = 1.0;    // dynamic risk per trade: lowest % of equity
+input double MaxRiskPercent   = 5.0;    // dynamic risk per trade: highest % of equity (0 = use FixedLots)
+input RISK_MODE RiskMode      = RISK_DD_EDGE; // DD_EDGE = drawdown x slot edge (research best), DD = drawdown only, EDGE = edge only (risky), FIXED_MAX = always MaxRiskPercent
+input double EdgeLow          = 0.73;   // slot edge (median MFE / median MAE of recent signals) at or below this -> lowest edge score
+input double EdgeHigh         = 2.6;    // slot edge at or above this -> full edge score
+input double FixedLots        = 0.01;   // used when MaxRiskPercent = 0
 input double MaxSpreadPoints  = 80;     // skip entries when spread is wider (points)
 input int    ServerUTCOffset  = 2;      // broker server time minus UTC, hours
 input int    MaxHoldDays      = 30;     // safety time exit
 input double MaxOpenRiskPercent = 15;   // cap on the summed risk of all open positions (positions with a stop in profit count as 0)
-input double ThrottleFullDD     = 20;   // risk shrinks linearly as equity falls below its peak; at this drawdown % it reaches the floor
-input double ThrottleFloor      = 0.1;  // lowest share of RiskPercent used deep in drawdown (0.1 = 10%)
+input double ThrottleFullDD     = 20;   // risk slides from Max toward Min as equity falls below its peak; at this drawdown % it is MinRiskPercent
 input double MaxDrawdownStopPercent = 0; // hard stop for NEW trades at this drawdown % (0 = off; research: a hard stop hurt recovery)
 input int    MaxTotalPositions = 7;     // cap on open positions across all slots
 input int    MaxPositions     = 1;      // per slot. >1 = pyramiding: add only while all open positions are risk-free (hedging account)
@@ -73,7 +77,7 @@ struct Slot
    Sig sigs[]; int nsig;
    datetime lastBar;
    // last calibrated values (for the panel)
-   double kNow, r1Now, trNow;
+   double kNow, r1Now, trNow, riskNow;
 };
 Slot S[NS];
 CTrade trade;
@@ -311,21 +315,39 @@ bool DrawdownStopActive()
    if(MaxDrawdownStopPercent <= 0) return false;
    return CurrentDrawdown() * 100.0 > MaxDrawdownStopPercent;
 }
-// share of RiskPercent to use now: 1 at the equity peak, falling linearly to ThrottleFloor at ThrottleFullDD
-double RiskThrottle()
+// drawdown score: 1 at the equity peak, falling linearly to 0 at ThrottleFullDD
+double DDScore()
 {
    if(ThrottleFullDD <= 0) return 1.0;
-   return MathMax(ThrottleFloor, 1.0 - CurrentDrawdown() * 100.0 / ThrottleFullDD);
+   return MathMax(0.0, 1.0 - CurrentDrawdown() * 100.0 / ThrottleFullDD);
+}
+// edge score of a slot: median favourable / median adverse move of its recent signals, scaled 0..1
+double EdgeScore(Slot &s)
+{
+   double mae = SigQuantile(s, 0, 0.5, -1), mfe = SigQuantile(s, 1, 0.5, -1);
+   if(mae <= 0 || mfe < 0 || EdgeHigh <= EdgeLow) return 0.5;    // not enough history yet -> neutral
+   return MathMax(0.0, MathMin(1.0, (mfe / mae - EdgeLow) / (EdgeHigh - EdgeLow)));
+}
+// risk % for a new trade of this slot: MinRiskPercent .. MaxRiskPercent
+double RiskPctNow(Slot &s)
+{
+   double mn = MathMin(MinRiskPercent, MaxRiskPercent), mx = MaxRiskPercent;
+   double x;
+   if(RiskMode == RISK_FIXED_MAX)  x = 1.0;
+   else if(RiskMode == RISK_DD)    x = DDScore();
+   else if(RiskMode == RISK_EDGE)  x = EdgeScore(s);
+   else                            x = DDScore() * (0.5 + 0.5 * EdgeScore(s));
+   return mn + (mx - mn) * x;
 }
 
 //------------------------------------------------------------------ trading
-double Lots(double stopDist)
+double Lots(double stopDist, double riskPct)
 {
    double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP), mn = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN), mx = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   if(RiskPercent <= 0) return MathMax(mn, FixedLots);
+   if(MaxRiskPercent <= 0) return MathMax(mn, FixedLots);
    double tv = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE), ts = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    if(tv <= 0 || ts <= 0 || stopDist <= 0) return 0;
-   double lots = AccountInfoDouble(ACCOUNT_EQUITY) * RiskPercent * RiskThrottle() / 100.0 / (stopDist / ts * tv);
+   double lots = AccountInfoDouble(ACCOUNT_EQUITY) * riskPct / 100.0 / (stopDist / ts * tv);
    lots = MathFloor(lots / step) * step;
    if(lots < mn) return 0;                 // risk too small for the minimum lot -> skip rather than over-risk
    return MathMin(mx, lots);
@@ -382,8 +404,10 @@ void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
    s.kNow = k; s.r1Now = r1; s.trNow = tw;
    if((SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point > MaxSpreadPoints) return;
    if(DrawdownStopActive()) { Print("Drawdown stop active: equity is more than ", MaxDrawdownStopPercent, "% below its peak - no new trades"); return; }
-   double lots = Lots(risk);
-   if(lots > 0 && RiskPercent > 0)
+   double riskPct = RiskPctNow(s);
+   s.riskNow = riskPct;
+   double lots = Lots(risk, riskPct);
+   if(lots > 0 && MaxRiskPercent > 0)
    {
       // shrink (or skip) the trade so the summed open risk stays under MaxOpenRiskPercent
       double room = MaxOpenRiskPercent - OpenRiskPercent();
@@ -397,7 +421,7 @@ void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
       }
       if(lots <= 0) { Print("Slot ", slotIdx + 1, ": open-risk cap ", MaxOpenRiskPercent, "% reached - skipped"); return; }
    }
-   if(lots <= 0) { Print("Slot ", slotIdx + 1, ": stop $", DoubleToString(risk, 2), " too wide for RiskPercent - skipped"); return; }
+   if(lots <= 0) { Print("Slot ", slotIdx + 1, ": stop $", DoubleToString(risk, 2), " too wide for risk " + DoubleToString(riskPct, 2) + "% - skipped"); return; }
    trade.SetExpertMagicNumber(s.magic);
    double sl = NormalizeDouble(lvl - dir * risk, _Digits);
    bool ok = dir == 1 ? trade.Buy(lots, _Symbol, 0, sl, 0, "DTC-dyn") : trade.Sell(lots, _Symbol, 0, sl, 0, "DTC-dyn");
@@ -489,7 +513,7 @@ void Load(int k, string spec)
 {
    string sp = spec; StringTrimLeft(sp); StringTrimRight(sp); string up = sp; StringToUpper(up);
    S[k].on = !(up == "" || up == "OFF");
-   S[k].magic = MagicBase + k; S[k].nsig = 0; S[k].lastBar = 0; S[k].kNow = 0; S[k].r1Now = 0; S[k].trNow = 0;
+   S[k].magic = MagicBase + k; S[k].nsig = 0; S[k].lastBar = 0; S[k].kNow = 0; S[k].r1Now = 0; S[k].trNow = 0; S[k].riskNow = 0;
    ArrayResize(S[k].sigs, 0);
    if(!S[k].on) return;
    S[k].tf = ParseTF(SpecGet(sp, "TF", "M15"));
@@ -581,8 +605,8 @@ void OnTick()
    {
       string txt = "DTC Gold Dynamic (7 slots)\n";
       for(int k = 0; k < NS; k++) if(S[k].on)
-         txt += StringFormat("Slot %d %s | signals %d | last SL %.2f ATR, TP1 %.2f R, trail $%.1f\n",
-                             k + 1, EnumToString(S[k].tf), S[k].nsig, S[k].kNow, S[k].r1Now, S[k].trNow);
+         txt += StringFormat("Slot %d %s | signals %d | last SL %.2f ATR, TP1 %.2f R, trail $%.1f | risk now %.2f%%\n",
+                             k + 1, EnumToString(S[k].tf), S[k].nsig, S[k].kNow, S[k].r1Now, S[k].trNow, RiskPctNow(S[k]));
       Comment(txt);
    }
 }
