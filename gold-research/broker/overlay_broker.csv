@@ -1,0 +1,30 @@
+rule,sumR,DD,mpos,worst,sh,summer25,calmar
+base,409.4,26.7,14/19,-13.4,0.86,4.0,15.3
+giveback peak>=1.0R keep 0.4,306.3,20.0,15/19,-8.0,0.99,7.7,15.3
+giveback peak>=1.0R keep 0.5,288.3,18.8,15/19,-6.2,1.03,9.0,15.3
+giveback peak>=1.0R keep 0.6,234.2,20.6,15/19,-6.1,0.96,1.0,11.4
+giveback peak>=1.0R keep 0.7,207.6,21.5,15/19,-5.5,0.99,0.3,9.7
+giveback peak>=1.5R keep 0.4,340.4,21.7,16/19,-7.9,1.0,11.1,15.7
+giveback peak>=1.5R keep 0.5,332.4,22.4,15/19,-6.3,1.05,9.3,14.8
+giveback peak>=1.5R keep 0.6,298.8,24.1,16/19,-5.7,1.01,1.1,12.4
+giveback peak>=1.5R keep 0.7,260.9,24.6,15/19,-5.3,1.01,-1.6,10.6
+giveback peak>=2.0R keep 0.4,359.0,23.5,15/19,-9.0,0.99,8.7,15.3
+giveback peak>=2.0R keep 0.5,348.2,24.1,15/19,-7.9,1.03,7.7,14.4
+giveback peak>=2.0R keep 0.6,322.2,24.9,15/19,-6.6,1.02,3.2,12.9
+giveback peak>=2.0R keep 0.7,298.4,24.2,15/19,-5.8,1.04,2.5,12.3
+giveback peak>=3.0R keep 0.4,382.6,25.1,15/19,-13.4,0.93,5.5,15.2
+giveback peak>=3.0R keep 0.5,381.2,24.4,15/19,-13.4,0.96,6.2,15.6
+giveback peak>=3.0R keep 0.6,371.9,24.3,15/19,-13.2,0.96,2.2,15.3
+giveback peak>=3.0R keep 0.7,366.5,23.6,15/19,-13.0,0.96,2.9,15.5
+trend flip: 1h close vs EMA20,252.0,26.8,15/19,-13.6,0.98,-11.4,9.4
+trend flip: 1h close vs EMA50,362.4,21.0,15/19,-11.2,0.86,6.8,17.3
+trend flip: 1h EMA20 x EMA50,404.8,24.4,14/19,-12.2,0.87,6.3,16.6
+trend flip: 4h close vs EMA20,402.0,22.6,14/19,-12.0,0.84,8.1,17.8
+trend flip: 4h close vs EMA50,407.2,25.9,14/19,-13.0,0.86,4.8,15.7
+trend flip: 4h EMA20 x EMA50,407.3,26.7,14/19,-13.4,0.85,4.0,15.3
+trend flip (in profit): 1h close vs EMA20,360.4,21.7,16/19,-6.8,0.94,-0.8,16.6
+trend flip (in profit): 1h close vs EMA50,386.7,24.5,14/19,-12.8,0.88,4.2,15.8
+trend flip (in profit): 1h EMA20 x EMA50,411.9,25.6,14/19,-13.0,0.87,5.1,16.1
+trend flip (in profit): 4h close vs EMA20,416.3,24.9,14/19,-12.9,0.87,5.7,16.7
+trend flip (in profit): 4h close vs EMA50,409.9,26.7,14/19,-13.4,0.86,4.0,15.4
+trend flip (in profit): 4h EMA20 x EMA50,409.4,26.7,14/19,-13.4,0.86,4.0,15.3
