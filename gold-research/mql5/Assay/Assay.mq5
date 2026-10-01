@@ -45,7 +45,7 @@ input ulong           MagicBase              = 881000;   // Trade ID (magic numb
 input bool            ShowPanel              = true;   // Show dashboard
 input int             UiScale                = 100;   // Dashboard & chart text size (%)
 input group "Risk & Money Management"
-input double          MaxRiskPercent         = 2.0;   // Max risk per trade (%)  [was 5: 30% equity drawdowns]
+input double          MaxRiskPercent         = 5.0;   // Max risk per trade (%)
 input double          MaxOpenRiskPercent     = 15;   // Max total open risk (%)
 input int             MaxTotalPositions      = 10;   // Max open trades
 input double          DailyLossStopPct       = 0;   // Daily loss limit (%, 0 = off)
@@ -101,9 +101,8 @@ RDIAL bool   MinLotStretch    = true;   // below the minimum lot: take the minim
 RDIAL double MinLotStretchMaxPct = 2;   // a stretched min-lot trade may risk at most this % of equity (0 = MaxRiskPercent)
 RDIAL bool   MinLotStretchFades = false; // the stretch for the fade slots too (A59: their wide-stop signals average ~0R)
 RDIAL bool   MinLotRegimeGate = false;  // stretch only while the slot is in the better half of its own regime
-RDIAL int    ServerUTCOffset  = -1;     // broker server time minus UTC, hours (-1 = automatic, follows the broker's summer/winter time)
+RDIAL int    ServerUTCOffset  = 2;      // broker server time minus UTC, hours
 RDIAL int    MaxHoldDays      = 30;     // safety time exit
-RDIAL bool   ThrottleOnBalance  = true; // measure the drawdown peak on closed-trade BALANCE (a floating peak that is given back froze risk at the minimum for months)
 RDIAL double ThrottleFullDD     = 20;   // risk slides from Max toward Min as equity falls below its peak; at this drawdown % it is MinRiskPercent
 RDIAL double PyrRiskMult      = 1.0;    // a pyramid add's stop distance, as a share of a first entry's (its size is a first entry's)
 RDIAL bool   PyrBookAtTp1     = false;  // a pyramid add closes whole at its first target instead of running
@@ -133,14 +132,13 @@ input group "=== Strategy slots (spec string, or OFF) ==="
 // Keys: TF=M3|M5|M15|M30|H1  ENTRY=PB|RSI2|BRK  EMA=30|40|60 (PB)  RSI=10|5 (RSI2)  BRKN=20 (BRK)
 //       CONF1/CONF2=NONE|M15|H1|H4 (higher-TF EMA stack must agree)  ADX=ANY|LT30  SESS=1|0
 //       LOOK (signals used for calibration)  QSL QTP QTR (quantiles)  LOCK (R)  F1 (share closed at TP1)
-//       TPR (close all at this R)  BE (breakeven trigger, R)  GBR/GBK (giveback: after GBR x R keep GBK of the best profit)
 // Defaults = the 7-strategy portfolio from the research (steps 1..7). Use OFF to disable a slot.
-RDIAL string Slot1 = "TF=M30;ENTRY=PB;EMA=30;CONF1=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0;LOCK=0.25;QTR=0;F1=0;AH=0.8;TPR=3;BE=1;GBR=1.5;GBK=0.5";
-RDIAL string Slot2 = "TF=M15;ENTRY=BRK;BRKN=20;CONF1=H1;CONF2=H4;SESS=0;LOOK=60;QSL=0.5;QTP=0;LOCK=0.1;QTR=0;F1=0;AH=0.8;TPR=3;BE=1;GBR=1.5;GBK=0.5";
-RDIAL string Slot3 = "TF=M3;ENTRY=RSI2;RSI=10;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0;LOCK=0.1;QTR=0;F1=0;TPR=3;BE=1;GBR=1.5;GBK=0.5";
-RDIAL string Slot4 = "TF=M30;ENTRY=BRK;BRKN=20;SESS=0;LOOK=60;QSL=0.7;QTP=0;LOCK=0.25;QTR=0;F1=0;AH=0.8;TPR=3;BE=1;GBR=1.5;GBK=0.5";
-RDIAL string Slot5 = "TF=M5;ENTRY=PB;EMA=30;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.5;QTP=0;LOCK=0.25;QTR=0;F1=0;AH=0.8;TPR=3;BE=1;GBR=1.5;GBK=0.5";
-RDIAL string Slot6 = "TF=M3;ENTRY=RSI2;RSI=5;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0;LOCK=0.1;QTR=0;F1=0;TPR=3;BE=1;GBR=1.5;GBK=0.5";
+RDIAL string Slot1 = "TF=M30;ENTRY=PB;EMA=30;CONF1=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.3;LOCK=0.25;QTR=0.8;F1=0;AH=0.8";
+RDIAL string Slot2 = "TF=M15;ENTRY=BRK;BRKN=20;CONF1=H1;CONF2=H4;SESS=0;LOOK=60;QSL=0.5;QTP=0.2;LOCK=0.1;QTR=0.8;F1=0;AH=0.8";
+RDIAL string Slot3 = "TF=M3;ENTRY=RSI2;RSI=10;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.85;LOCK=0.1;QTR=0.5;F1=0.5";
+RDIAL string Slot4 = "TF=M30;ENTRY=BRK;BRKN=20;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.25;QTR=0.8;F1=0;AH=0.8";
+RDIAL string Slot5 = "TF=M5;ENTRY=PB;EMA=30;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.5;QTP=0.5;LOCK=0.25;QTR=0.5;F1=0.5;AH=0.8";
+RDIAL string Slot6 = "TF=M3;ENTRY=RSI2;RSI=5;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.85;LOCK=0.1;QTR=0.5;F1=0.5";
 RDIAL string Slot7 = "OFF;TF=M3;ENTRY=BRK;BRKN=20;CONF1=M15;CONF2=H1;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.8;F1=0";
 
 #ifdef RESEARCH_BUILD
@@ -189,7 +187,7 @@ struct Sig { datetime t; int dir; double lvl; double atr; double adx; double mae
 
 struct Slot
 {
-   bool on, mr; ENUM_TIMEFRAMES tf, c1, c2; int entry, pb, rsiTh, brkN, adx, horizon, look, reg; bool sess; double qsl, qtp, lock, qtr, f1, zTh, km, rm, tm, be, bel, st, ah, tpr, gbr, gbk; ulong magic;
+   bool on, mr; ENUM_TIMEFRAMES tf, c1, c2; int entry, pb, rsiTh, brkN, adx, horizon, look, reg; bool sess; double qsl, qtp, lock, qtr, f1, zTh, km, rm, tm, be, bel, st, ah; ulong magic;
    Sig sigs[]; int nsig;
    datetime lastBar;
    // last calibrated values (for the panel)
@@ -268,8 +266,7 @@ int HtfDirAt(ENUM_TIMEFRAMES tf, datetime T)
 }
 bool InSessionUTC(datetime serverT)
 {
-   int off = ServerUTCOffset >= 0 ? ServerUTCOffset : PropServerOffset(serverT);
-   MqlDateTime t; TimeToStruct(serverT - off * 3600, t);
+   MqlDateTime t; TimeToStruct(serverT - ServerUTCOffset * 3600, t);
    return t.hour >= SessFromUTC && t.hour < SessToUTC;
 }
 
@@ -519,13 +516,13 @@ double g_peak    = 0.0;
 bool   g_peakFrozen = false;
 double CurrentDrawdown()
 {
-   double eq = AccountInfoDouble(ThrottleOnBalance ? ACCOUNT_BALANCE : ACCOUNT_EQUITY);
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
    if(g_peakKey == "")
    {
       //  keyed by LOGIN too: the peak drives the risk throttle, and without the
       //  login a move from a demo to a live account inherited the demo's peak
       g_peakKey = "ASSAY_PEAK_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
-                  + "_" + _Symbol + "_" + IntegerToString((long)MagicBase) + (ThrottleOnBalance ? "_B" : "");
+                  + "_" + _Symbol + "_" + IntegerToString((long)MagicBase);
       g_peak = GlobalVariableCheck(g_peakKey) ? GlobalVariableGet(g_peakKey) : eq;
       GlobalVariableSet(g_peakKey, g_peak);
    }
@@ -766,8 +763,7 @@ void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
    trade.SetExpertMagicNumber(s.magic);
    double sl = NormalizeDouble(lvl - dir * stopDist, _Digits);
    double tp = s.mr && r1 > 0 ? NormalizeDouble(lvl + dir * r1 * risk, _Digits)
-             : (pyAdd && PyrBookAtTp1 && r1 > 0 ? NormalizeDouble(lvl + dir * r1 * stopDist, _Digits)
-             : (s.tpr > 0 ? NormalizeDouble(lvl + dir * s.tpr * risk, _Digits) : 0));   // fades: whole position at the target; trend: TPR x R
+             : (pyAdd && PyrBookAtTp1 && r1 > 0 ? NormalizeDouble(lvl + dir * r1 * stopDist, _Digits) : 0);   // fades: whole position at the target
    //  the order comment names the strategy, so the trader's own history does
    string cmt = "Assay " + (s.mr ? "F" : "S") + IntegerToString(slotIdx + 1);
    bool ok = dir == 1 ? trade.Buy(lots, _Symbol, 0, sl, tp, cmt) : trade.Sell(lots, _Symbol, 0, sl, tp, cmt);
@@ -847,19 +843,6 @@ void ManagePosition(Slot &s, int slotIdx, ulong tk, bool newH4)
       double bePx = PS[i].entry + dir * s.bel * PS[i].risk;
       if((dir == 1 && bePx > nsl) || (dir == -1 && bePx < nsl)) nsl = bePx;
       PS[i].beDone = true;
-   }
-   //  GIVEBACK. Once the best open profit reaches GBR x R, the stop follows at
-   //  GBK of that best profit: a big move is banked instead of handed back.
-   //  Research (finding 62/69): after +1.5R keep half -- smoother months on both
-   //  price sources. Only ever moves the stop forward.
-   if(s.gbr > 0 && PS[i].risk > 0)
-   {
-      double bestProf = (PS[i].best - PS[i].entry) * dir;
-      if(bestProf >= s.gbr * PS[i].risk)
-      {
-         double g = PS[i].entry + dir * s.gbk * bestProf;
-         if((dir == 1 && g > nsl) || (dir == -1 && g < nsl)) nsl = g;
-      }
    }
    if(!PS[i].tp1Done && PS[i].risk > 0 && (px - PS[i].lvl) * dir >= PS[i].r1 * PS[i].risk)
    {
@@ -991,9 +974,6 @@ void Load(int k, string spec)
    S[k].bel = StringToDouble(SpecGet(sp, "BEL", "0.05")); // where the stop goes, in R from the fill
    S[k].st = StringToDouble(SpecGet(sp, "ST", "0"));      // structure trail: buffer under the last M15 swing, in ATR(M15) (0 = off)
    S[k].ah = StringToDouble(SpecGet(sp, "AH", "0"));      // halve the lot when ADX is above this quantile of the slot's own signals (0 = off)
-   S[k].tpr = S[k].mr ? 0 : StringToDouble(SpecGet(sp, "TPR", "0"));   // close the whole position at this R (0 = off)
-   S[k].gbr = S[k].mr ? 0 : StringToDouble(SpecGet(sp, "GBR", "0"));   // giveback: once the best profit reaches this R ...
-   S[k].gbk = StringToDouble(SpecGet(sp, "GBK", "0.5"));               // ... the stop keeps this share of the best profit
    if(S[k].st > 0) TI(PERIOD_M15);
    TI(S[k].tf); TI(PERIOD_H4); TI(PERIOD_D1);
    if(S[k].c1 != PERIOD_CURRENT) TI(S[k].c1);
