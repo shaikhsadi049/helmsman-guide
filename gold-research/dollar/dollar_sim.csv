@@ -1,0 +1,41 @@
+exit,money,period,final,maxDD_pct,months_pos,jan26,feb_aug26,trades
+E0_today_minlot,"EA now: 1-5%, throttle 20%",2026 from $1k,10617,28.3,5/8,4355,5262,446
+E0_today_minlot,"EA now: 1-5%, throttle 20%",2025-26 from $1k,170850,36.7,10/20,92638,61835,987
+E0_today_minlot,"EA now, no min-lot stretch",2026 from $1k,10295,27.7,5/8,4355,4939,445
+E0_today_minlot,"EA now, no min-lot stretch",2025-26 from $1k,54923,34.3,10/20,28216,21551,945
+E0_today_minlot,"1-2% by trend, no throttle",2026 from $1k,4647,22.7,4/8,2230,1417,333
+E0_today_minlot,"1-2% by trend, no throttle",2025-26 from $1k,48405,37.9,13/20,22370,18091,999
+E0_today_minlot,fixed 1%,2026 from $1k,4323,17.5,3/8,2230,1093,254
+E0_today_minlot,fixed 1%,2025-26 from $1k,15287,23.9,11/20,6864,2642,910
+E0_today_minlot,fixed 2%,2026 from $1k,4840,31.9,4/8,2230,1610,358
+E0_today_minlot,fixed 2%,2025-26 from $1k,57759,52.6,11/20,26900,23561,1000
+E1_mode1_be,"EA now: 1-5%, throttle 20%",2026 from $1k,10452,31.1,5/8,5716,3736,332
+E1_mode1_be,"EA now: 1-5%, throttle 20%",2025-26 from $1k,206211,51.4,9/20,159073,30394,732
+E1_mode1_be,"EA now, no min-lot stretch",2026 from $1k,9730,31.9,4/8,5716,3014,330
+E1_mode1_be,"EA now, no min-lot stretch",2025-26 from $1k,154585,39.2,9/20,118750,23211,697
+E1_mode1_be,"1-2% by trend, no throttle",2026 from $1k,7080,32.8,4/8,3834,2246,299
+E1_mode1_be,"1-2% by trend, no throttle",2025-26 from $1k,104304,49.6,11/20,62026,28108,745
+E1_mode1_be,fixed 1%,2026 from $1k,6058,21.3,3/8,3834,1224,235
+E1_mode1_be,fixed 1%,2025-26 from $1k,26444,41.0,11/20,14629,4667,663
+E1_mode1_be,fixed 2%,2026 from $1k,5790,42.2,4/8,3834,956,302
+E1_mode1_be,fixed 2%,2025-26 from $1k,114307,62.0,10/20,71513,30170,747
+E2_3R_be,"EA now: 1-5%, throttle 20%",2026 from $1k,3696,31.0,6/8,640,2055,328
+E2_3R_be,"EA now: 1-5%, throttle 20%",2025-26 from $1k,33534,35.9,11/20,10924,16603,1065
+E2_3R_be,"EA now, no min-lot stretch",2026 from $1k,1282,20.5,3/6,289,-7,83
+E2_3R_be,"EA now, no min-lot stretch",2025-26 from $1k,778,34.5,3/11,0,-15,218
+E2_3R_be,"1-2% by trend, no throttle",2026 from $1k,1336,18.4,4/7,314,22,126
+E2_3R_be,"1-2% by trend, no throttle",2025-26 from $1k,59576,39.2,12/20,19077,28732,1157
+E2_3R_be,fixed 1%,2026 from $1k,1290,17.6,4/7,314,-24,105
+E2_3R_be,fixed 1%,2025-26 from $1k,14718,29.5,12/20,4161,4144,1034
+E2_3R_be,fixed 2%,2026 from $1k,1361,17.3,3/7,314,47,152
+E2_3R_be,fixed 2%,2025-26 from $1k,93477,44.8,13/20,27956,50659,1167
+E3_3R_be_gb,"EA now: 1-5%, throttle 20%",2026 from $1k,3706,33.0,4/8,1464,1242,346
+E3_3R_be_gb,"EA now: 1-5%, throttle 20%",2025-26 from $1k,50892,31.8,14/20,17242,28022,1138
+E3_3R_be_gb,"EA now, no min-lot stretch",2026 from $1k,1122,20.7,3/6,105,17,63
+E3_3R_be_gb,"EA now, no min-lot stretch",2025-26 from $1k,802,30.5,3/11,0,-15,229
+E3_3R_be_gb,"1-2% by trend, no throttle",2026 from $1k,1132,15.8,3/7,112,20,111
+E3_3R_be_gb,"1-2% by trend, no throttle",2025-26 from $1k,47633,37.5,14/20,16026,22253,1222
+E3_3R_be_gb,fixed 1%,2026 from $1k,1055,16.0,4/7,112,-57,89
+E3_3R_be_gb,fixed 1%,2025-26 from $1k,14115,29.6,12/20,4145,3479,1108
+E3_3R_be_gb,fixed 2%,2026 from $1k,1167,14.2,4/7,112,54,118
+E3_3R_be_gb,fixed 2%,2025-26 from $1k,78616,38.9,14/20,23869,43050,1241
