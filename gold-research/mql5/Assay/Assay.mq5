@@ -112,17 +112,6 @@ RDIAL double TP1FractionOverride = -1;  // -1 = use each slot's F1; 0.5 = close 
 //  was actually asked for (F1 > 0); slots with F1 = 0 are unaffected, since
 //  for them locking the stop IS the mechanism rather than a consolation.
 RDIAL int    MinLotTp1Mode    = 0;      // 0 = lock the stop anyway (as before), 1 = leave it running, 2 = close it all
-//  Profit ratchet. The H4 trail is wide by design (it is measured from whole
-//  H4 trend pullbacks) and only moves on an H4 close, so an intraday spike to
-//  several R could fall all the way back to the TP1 lock. Once open profit
-//  reaches what only the best tenth of this slot's recent signals reached
-//  (the 0.9 quantile of their favourable excursion, in R), the stop keeps at
-//  least RatchetKeep of the open profit, checked on every tick.
-//  2025-01..2026-07, S1-S6 + fades, 1..5% risk: same total growth, losing
-//  months 5 -> 3, trades that reached 2R but ended under 0.5R 46 -> 35.
-RDIAL bool   ProfitRatchet    = true;
-RDIAL double RatchetQ         = 0.9;    // which recent-signal profit counts as "big" (quantile)
-RDIAL double RatchetKeep      = 0.5;    // share of open profit the stop keeps once it is big
 RDIAL int    BackfillDays     = 240;    // days of history scanned at start to calibrate (research used ~7 months)
 
 #ifdef RESEARCH_BUILD
@@ -617,7 +606,7 @@ double Lots(double stopDist, double riskPct, double regime = 1.0, bool stretchOk
    return lots;
 }
 // ---- per-position state (several positions per slot when pyramiding)
-struct PState { ulong tk; int slot; int dir; double risk, lvl, entry, best, trailW, r1, lock, ratA; bool tp1Done; datetime openT; };
+struct PState { ulong tk; int slot; int dir; double risk, lvl, entry, best, trailW, r1, lock; bool tp1Done; datetime openT; };
 PState PS[]; int nPS = 0;
 int FindPS(ulong tk) { for(int k = 0; k < nPS; k++) if(PS[k].tk == tk) return k; return -1; }
 void DropClosed()
@@ -667,7 +656,6 @@ void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
    double stopDist = pyAdd ? risk * PyrRiskMult : risk;
    double r1 = 0;
    if(s.qtp > 0) r1 = MathMax(R1_MIN, MathMin(s.mr ? 5.0 : R1_MAX, SigQuantile(s, 1, s.qtp, 1.0) / k));
-   double ratA = (ProfitRatchet && !s.mr) ? SigQuantile(s, 1, RatchetQ, 0) / k : 0;   // "big" profit in R, 0 = not enough history
    //  the slot's exit scale (KM, RM, TM in its spec -- A64/A65). Stop, first
    //  target and trail stay measured from the market; only their size moves.
    //  Applied after r1 is measured, so the first target keeps its R.
@@ -758,7 +746,7 @@ void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
       ArrayResize(PS, nPS + 1);
       PS[nPS].tk = trade.ResultOrder(); PS[nPS].slot = slotIdx; PS[nPS].dir = dir; PS[nPS].risk = stopDist; PS[nPS].lvl = lvl;
       PS[nPS].entry = trade.ResultPrice(); PS[nPS].best = trade.ResultPrice(); PS[nPS].trailW = tw; PS[nPS].r1 = r1;
-      PS[nPS].lock = s.lock; PS[nPS].ratA = ratA; PS[nPS].tp1Done = (r1 <= 0) || s.mr || (pyAdd && PyrBookAtTp1); PS[nPS].openT = TimeCurrent();
+      PS[nPS].lock = s.lock; PS[nPS].tp1Done = (r1 <= 0) || s.mr || (pyAdd && PyrBookAtTp1); PS[nPS].openT = TimeCurrent();
       nPS++;
       g_prop.OnTradeOpened();
    }
@@ -778,8 +766,6 @@ void ManagePosition(Slot &s, int slotIdx, ulong tk, bool newH4)
       ArrayResize(PS, nPS + 1); i = nPS++;
       PS[i].tk = tk; PS[i].slot = slotIdx; PS[i].dir = dir; PS[i].entry = op; PS[i].lvl = op; PS[i].risk = MathAbs(op - sl);
       PS[i].best = dir == 1 ? MathMax(op, px) : MathMin(op, px); PS[i].r1 = 0; PS[i].lock = s.lock;
-      double km0 = MathMax(s.mr ? 0.3 : K_MIN, MathMin(K_MAX, SigQuantile(s, 0, s.qsl, 2.0)));
-      PS[i].ratA = (ProfitRatchet && !s.mr && PS[i].risk > 0) ? SigQuantile(s, 1, RatchetQ, 0) / km0 : 0;
       PS[i].tp1Done = true;                                  // partial state unknown -> never partial-close again (fades keep their broker TP)
       PS[i].trailW = s.qtr > 0 ? TrailQuantile(s.qtr) * B(hA[TI(PERIOD_H4)], 1) * s.tm : 0;
       PS[i].openT = (datetime)PositionGetInteger(POSITION_TIME);
@@ -822,12 +808,6 @@ void ManagePosition(Slot &s, int slotIdx, ulong tk, bool newH4)
    {
       double ns = PS[i].best - dir * PS[i].trailW;
       if((dir == 1 && ns > nsl) || (dir == -1 && ns < nsl)) nsl = ns;
-   }
-   if(PS[i].ratA > 0 && PS[i].risk > 0 && (PS[i].best - PS[i].entry) * dir >= PS[i].ratA * PS[i].risk)
-   {
-      double rs = PS[i].entry + dir * RatchetKeep * (PS[i].best - PS[i].entry);
-      //  move only in steps of a tenth of R, so a running spike is not a stream of modify requests
-      if((dir == 1 && rs > nsl + 0.1 * PS[i].risk) || (dir == -1 && rs < nsl - 0.1 * PS[i].risk)) nsl = rs;
    }
    if(TimeCurrent() - PS[i].openT > MaxHoldDays * 86400) { trade.PositionClose(tk); return; }
    if(s.mr && TimeCurrent() - PS[i].openT >= s.horizon * 60) { trade.PositionClose(tk); return; }   // fade did not work in time
