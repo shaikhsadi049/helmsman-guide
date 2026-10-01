@@ -43,6 +43,7 @@
 input group "General"
 input ulong           MagicBase              = 881000;   // Trade ID (magic number)
 input bool            ShowPanel              = true;   // Show dashboard
+input int             UiScale                = 100;   // Dashboard & chart text size (%)
 input group "Risk & Money Management"
 input double          MaxRiskPercent         = 5.0;   // Max risk per trade (%)
 input double          MaxOpenRiskPercent     = 15;   // Max total open risk (%)
@@ -132,12 +133,12 @@ input group "=== Strategy slots (spec string, or OFF) ==="
 //       CONF1/CONF2=NONE|M15|H1|H4 (higher-TF EMA stack must agree)  ADX=ANY|LT30  SESS=1|0
 //       LOOK (signals used for calibration)  QSL QTP QTR (quantiles)  LOCK (R)  F1 (share closed at TP1)
 // Defaults = the 7-strategy portfolio from the research (steps 1..7). Use OFF to disable a slot.
-RDIAL string Slot1 = "TF=M30;ENTRY=PB;EMA=30;CONF1=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.3;LOCK=0.25;QTR=0.8;F1=0";
-RDIAL string Slot2 = "TF=M15;ENTRY=BRK;BRKN=20;CONF1=H1;CONF2=H4;SESS=0;LOOK=60;QSL=0.5;QTP=0.2;LOCK=0.1;QTR=0.8;F1=0";
-RDIAL string Slot3 = "TF=M3;ENTRY=RSI2;RSI=10;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.5;F1=0.5";
-RDIAL string Slot4 = "TF=M30;ENTRY=BRK;BRKN=20;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.25;QTR=0.8;F1=0";
-RDIAL string Slot5 = "TF=M5;ENTRY=PB;EMA=30;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.5;QTP=0.5;LOCK=0.25;QTR=0.5;F1=0.5";
-RDIAL string Slot6 = "TF=M3;ENTRY=RSI2;RSI=5;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.5;F1=0.5";
+RDIAL string Slot1 = "TF=M30;ENTRY=PB;EMA=30;CONF1=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.3;LOCK=0.25;QTR=0.8;F1=0;AH=0.8";
+RDIAL string Slot2 = "TF=M15;ENTRY=BRK;BRKN=20;CONF1=H1;CONF2=H4;SESS=0;LOOK=60;QSL=0.5;QTP=0.2;LOCK=0.1;QTR=0.8;F1=0;AH=0.8";
+RDIAL string Slot3 = "TF=M3;ENTRY=RSI2;RSI=10;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.85;LOCK=0.1;QTR=0.5;F1=0.5";
+RDIAL string Slot4 = "TF=M30;ENTRY=BRK;BRKN=20;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.25;QTR=0.8;F1=0;AH=0.8";
+RDIAL string Slot5 = "TF=M5;ENTRY=PB;EMA=30;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.5;QTP=0.5;LOCK=0.25;QTR=0.5;F1=0.5;AH=0.8";
+RDIAL string Slot6 = "TF=M3;ENTRY=RSI2;RSI=5;CONF1=M15;CONF2=H1;SESS=1;LOOK=60;QSL=0.7;QTP=0.85;LOCK=0.1;QTR=0.5;F1=0.5";
 RDIAL string Slot7 = "OFF;TF=M3;ENTRY=BRK;BRKN=20;CONF1=M15;CONF2=H1;SESS=0;LOOK=60;QSL=0.7;QTP=0.2;LOCK=0.1;QTR=0.8;F1=0";
 
 #ifdef RESEARCH_BUILD
@@ -182,11 +183,11 @@ RDIAL string SlotVeto    = "";      // research: "S3:hour<7;F9:adx>35" -- skip a
 #define EPISODES       20
 #define MAX_SIGS       400
 
-struct Sig { datetime t; int dir; double lvl; double atr; double mae; double mfe; bool done; datetime endT; };
+struct Sig { datetime t; int dir; double lvl; double atr; double adx; double mae; double mfe; bool done; datetime endT; };
 
 struct Slot
 {
-   bool on, mr; ENUM_TIMEFRAMES tf, c1, c2; int entry, pb, rsiTh, brkN, adx, horizon, look, reg; bool sess; double qsl, qtp, lock, qtr, f1, zTh, km, rm, tm; ulong magic;
+   bool on, mr; ENUM_TIMEFRAMES tf, c1, c2; int entry, pb, rsiTh, brkN, adx, horizon, look, reg; bool sess; double qsl, qtp, lock, qtr, f1, zTh, km, rm, tm, be, bel, st, ah; ulong magic;
    Sig sigs[]; int nsig;
    datetime lastBar;
    // last calibrated values (for the panel)
@@ -360,12 +361,25 @@ void Excursion(Sig &g, ENUM_TIMEFRAMES tf)
    }
    g.mae = a / g.atr; g.mfe = f / g.atr; g.done = true;
 }
-void AddSig(Slot &s, datetime T, int dir, double lvl, double atr)
+void AddSig(Slot &s, datetime T, int dir, double lvl, double atr, double adx = 0)
 {
    if(s.nsig >= MAX_SIGS) { for(int k = 1; k < s.nsig; k++) s.sigs[k - 1] = s.sigs[k]; s.nsig--; }
    if(ArraySize(s.sigs) < s.nsig + 1) ArrayResize(s.sigs, s.nsig + 50);
-   Sig g; g.t = T; g.dir = dir; g.lvl = lvl; g.atr = atr; g.mae = 0; g.mfe = 0; g.done = false; g.endT = T + s.horizon * 60;
+   Sig g; g.t = T; g.dir = dir; g.lvl = lvl; g.atr = atr; g.adx = adx; g.mae = 0; g.mfe = 0; g.done = false; g.endT = T + s.horizon * 60;
    s.sigs[s.nsig++] = g;
+}
+
+//  The q-quantile of the ADX this slot has seen on its OWN past signals. The
+//  trend being far along is only meaningful against what this strategy usually
+//  trades, so the threshold is the slot's own history, not a typed-in number.
+//  Returns 0 (= never halve) until there are enough signals to mean anything.
+double AdxQuantile(Slot &s, double q)
+{
+   if(s.nsig < 25) return 0;
+   double x[]; ArrayResize(x, s.nsig); int c = 0;
+   for(int k = 0; k < s.nsig; k++) if(s.sigs[k].adx > 0) x[c++] = s.sigs[k].adx;
+   if(c < 25) return 0;
+   return Quantile(x, c, q);
 }
 void Resolve(Slot &s, datetime now)
 {
@@ -606,7 +620,7 @@ double Lots(double stopDist, double riskPct, double regime = 1.0, bool stretchOk
    return lots;
 }
 // ---- per-position state (several positions per slot when pyramiding)
-struct PState { ulong tk; int slot; int dir; double risk, lvl, entry, best, trailW, r1, lock; bool tp1Done; datetime openT; };
+struct PState { ulong tk; int slot; int dir; double risk, lvl, entry, best, trailW, r1, lock; bool tp1Done, beDone; datetime openT; };
 PState PS[]; int nPS = 0;
 int FindPS(ulong tk) { for(int k = 0; k < nPS; k++) if(PS[k].tk == tk) return k; return -1; }
 void DropClosed()
@@ -726,6 +740,22 @@ void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
    //  the broker has to be able to carry it: at 1:30 on a prop account ten
    //  positions can run out of margin, and an order the broker refuses for
    //  "not enough money" would otherwise vanish with no record of why
+   //  HALF LOT IN A STRETCHED TREND. When this slot's own ADX is in its top
+   //  fifth, the entry is late and historically earns close to nothing, so it
+   //  is taken SMALL rather than skipped -- skipping would free the slot for
+   //  the next, usually worse, signal. Never below the broker's minimum: a lot
+   //  that rounded to zero would be a skip by another name.
+   if(s.ah > 0 && lots > 0)
+   {
+      double aq = AdxQuantile(s, s.ah);
+      double anow = B(hX[TI(s.tf)], 1);
+      if(aq > 0 && anow != EMPTY_VALUE && anow > aq)
+      {
+         double half = AcctFloorLots(lots * 0.5);
+         lots = MathMax(g_acct.volMin, half > 0 ? half : g_acct.volMin);
+         Why(slotIdx, StringFormat("half lot: ADX %.1f over %.1f", anow, aq));
+      }
+   }
    double fit = AcctFitMargin(dir, lots);
    if(fit <= 0) { Why(slotIdx, "skipped: not enough margin"); Print("Slot ", slotIdx + 1, ": not enough free margin for ", DoubleToString(lots, 2), " lots - skipped"); return; }
    if(fit < lots) { Print("Slot ", slotIdx + 1, ": margin allows ", DoubleToString(fit, 2), " of ", DoubleToString(lots, 2), " lots"); lots = fit; }
@@ -746,11 +776,41 @@ void Open(Slot &s, int slotIdx, int dir, double lvl, double atr)
       ArrayResize(PS, nPS + 1);
       PS[nPS].tk = trade.ResultOrder(); PS[nPS].slot = slotIdx; PS[nPS].dir = dir; PS[nPS].risk = stopDist; PS[nPS].lvl = lvl;
       PS[nPS].entry = trade.ResultPrice(); PS[nPS].best = trade.ResultPrice(); PS[nPS].trailW = tw; PS[nPS].r1 = r1;
-      PS[nPS].lock = s.lock; PS[nPS].tp1Done = (r1 <= 0) || s.mr || (pyAdd && PyrBookAtTp1); PS[nPS].openT = TimeCurrent();
+      PS[nPS].lock = s.lock; PS[nPS].tp1Done = (r1 <= 0) || s.mr || (pyAdd && PyrBookAtTp1);
+      PS[nPS].beDone = false; PS[nPS].openT = TimeCurrent();
       nPS++;
       g_prop.OnTradeOpened();
    }
 }
+//  The market's last CONFIRMED swing on M15: a bar whose low is the lowest of
+//  the three bars either side, and only once those three later bars have
+//  closed -- so shift 4 is the newest bar that can be a swing. Returns 0 when
+//  there is none within the lookback.
+double SwingM15(const int dir)
+{
+   const int LOOK = 160;
+   int bars = Bars(_Symbol, PERIOD_M15);
+   if(bars < 12) return 0;
+   int last = (int)MathMin(LOOK, bars - 8);
+   for(int sh = 4; sh <= last; sh++)
+   {
+      bool ok = true;
+      if(dir > 0)
+      {
+         double v = iLow(_Symbol, PERIOD_M15, sh);
+         for(int k = sh - 3; k <= sh + 3; k++) if(k != sh && iLow(_Symbol, PERIOD_M15, k) < v) { ok = false; break; }
+         if(ok) return v;
+      }
+      else
+      {
+         double v = iHigh(_Symbol, PERIOD_M15, sh);
+         for(int k = sh - 3; k <= sh + 3; k++) if(k != sh && iHigh(_Symbol, PERIOD_M15, k) > v) { ok = false; break; }
+         if(ok) return v;
+      }
+   }
+   return 0;
+}
+
 void ManagePosition(Slot &s, int slotIdx, ulong tk, bool newH4)
 {
    if(!PositionSelectByTicket(tk)) return;
@@ -767,12 +827,23 @@ void ManagePosition(Slot &s, int slotIdx, ulong tk, bool newH4)
       PS[i].tk = tk; PS[i].slot = slotIdx; PS[i].dir = dir; PS[i].entry = op; PS[i].lvl = op; PS[i].risk = MathAbs(op - sl);
       PS[i].best = dir == 1 ? MathMax(op, px) : MathMin(op, px); PS[i].r1 = 0; PS[i].lock = s.lock;
       PS[i].tp1Done = true;                                  // partial state unknown -> never partial-close again (fades keep their broker TP)
+      PS[i].beDone = true;                                   // and the stop it carries is already past any breakeven
       PS[i].trailW = s.qtr > 0 ? TrailQuantile(s.qtr) * B(hA[TI(PERIOD_H4)], 1) * s.tm : 0;
       PS[i].openT = (datetime)PositionGetInteger(POSITION_TIME);
    }
    PS[i].best = dir == 1 ? MathMax(PS[i].best, px) : MathMin(PS[i].best, px);
    trade.SetExpertMagicNumber(s.magic);
    double nsl = sl;
+   //  BREAKEVEN. A trade whose first target sits far away never reaches the
+   //  lock below, so until this existed it could run a full R in profit and
+   //  still come back a full loss. Measured from the FILL, and it only ever
+   //  moves the stop forward, so a trade that already locked is untouched.
+   if(!PS[i].beDone && s.be > 0 && PS[i].risk > 0 && (px - PS[i].entry) * dir >= s.be * PS[i].risk)
+   {
+      double bePx = PS[i].entry + dir * s.bel * PS[i].risk;
+      if((dir == 1 && bePx > nsl) || (dir == -1 && bePx < nsl)) nsl = bePx;
+      PS[i].beDone = true;
+   }
    if(!PS[i].tp1Done && PS[i].risk > 0 && (px - PS[i].lvl) * dir >= PS[i].r1 * PS[i].risk)
    {
       double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
@@ -803,6 +874,23 @@ void ManagePosition(Slot &s, int slotIdx, ulong tk, bool newH4)
          double lk = PS[i].entry + dir * PS[i].lock * PS[i].risk;
          if((dir == 1 && lk > nsl) || (dir == -1 && lk < nsl)) nsl = lk;
         }
+   }
+   //  STRUCTURE TRAIL. While price holds its last confirmed swing the trend is
+   //  intact; when it does not, the reason for the trade is gone. Read on every
+   //  tick, buffered by LIVE ATR(M15) so it widens when gold is wild and
+   //  tightens when it calms. It can only move the stop forward.
+   if(s.st > 0)
+   {
+      double sw = SwingM15(dir);
+      double a15 = B(hA[TI(PERIOD_M15)], 1);
+      if(sw > 0 && a15 != EMPTY_VALUE && a15 > 0)
+      {
+         double want = sw - dir * s.st * a15;
+         //  only once the trade is in profit: before that the measured stop is
+         //  the one that was sized for, and a swing far away would widen it
+         if((px - PS[i].entry) * dir > 0 && ((dir == 1 && want > nsl) || (dir == -1 && want < nsl)))
+            nsl = want;
+      }
    }
    if(newH4 && PS[i].trailW > 0)
    {
@@ -882,6 +970,11 @@ void Load(int k, string spec)
    S[k].km = StringToDouble(SpecGet(sp, "KM", "1"));
    S[k].rm = StringToDouble(SpecGet(sp, "RM", "1"));
    S[k].tm = StringToDouble(SpecGet(sp, "TM", "1"));
+   S[k].be = StringToDouble(SpecGet(sp, "BE", "0"));      // breakeven trigger, in R (0 = off)
+   S[k].bel = StringToDouble(SpecGet(sp, "BEL", "0.05")); // where the stop goes, in R from the fill
+   S[k].st = StringToDouble(SpecGet(sp, "ST", "0"));      // structure trail: buffer under the last M15 swing, in ATR(M15) (0 = off)
+   S[k].ah = StringToDouble(SpecGet(sp, "AH", "0"));      // halve the lot when ADX is above this quantile of the slot's own signals (0 = off)
+   if(S[k].st > 0) TI(PERIOD_M15);
    TI(S[k].tf); TI(PERIOD_H4); TI(PERIOD_D1);
    if(S[k].c1 != PERIOD_CURRENT) TI(S[k].c1);
    if(S[k].c2 != PERIOD_CURRENT) TI(S[k].c2);
@@ -892,17 +985,18 @@ void Backfill(Slot &s)
    // scan from the newest closed bar backwards and stop once enough signals are collected (fast start, same calibration)
    int n = (int)MathMin((double)BackfillDays * 86400.0 / PeriodSeconds(s.tf), (double)(Bars(_Symbol, s.tf) - 80));
    int need = MathMin(MAX_SIGS, s.look * 3);
-   datetime tT[]; int tD[]; double tL[], tA[]; int c = 0;
-   ArrayResize(tT, need); ArrayResize(tD, need); ArrayResize(tL, need); ArrayResize(tA, need);
+   datetime tT[]; int tD[]; double tL[], tA[], tX[]; int c = 0;
+   ArrayResize(tT, need); ArrayResize(tD, need); ArrayResize(tL, need); ArrayResize(tA, need); ArrayResize(tX, need);
    for(int sh = 2; sh <= n && c < need; sh++)
    {
       int d = SignalAt(s, sh);
       if(d == 0) continue;
       double atr = B(hA[TI(s.tf)], sh);
       if(atr == EMPTY_VALUE || atr <= 0) continue;
-      tT[c] = iTime(_Symbol, s.tf, sh) + PeriodSeconds(s.tf); tD[c] = d; tL[c] = iClose(_Symbol, s.tf, sh); tA[c] = atr; c++;
+      tT[c] = iTime(_Symbol, s.tf, sh) + PeriodSeconds(s.tf); tD[c] = d; tL[c] = iClose(_Symbol, s.tf, sh); tA[c] = atr;
+      tX[c] = B(hX[TI(s.tf)], sh); c++;
    }
-   for(int k = c - 1; k >= 0; k--) AddSig(s, tT[k], tD[k], tL[k], tA[k]);   // oldest first
+   for(int k = c - 1; k >= 0; k--) AddSig(s, tT[k], tD[k], tL[k], tA[k], tX[k]);   // oldest first
    Resolve(s, TimeCurrent());
    PrintFormat("Slot %d (%s): %d historical signals calibrated", (int)(s.magic - MagicBase + 1), EnumToString(s.tf), s.nsig);
 }
@@ -989,10 +1083,10 @@ int OnInit()
    if(g_dashOn)
      {
       OvClear();                // the object overlay of earlier builds
-      g_layerOn = g_layer.Init("ASSAY_LAYER", PropServerOffset(TimeCurrent()));
+      g_layerOn = g_layer.Init("ASSAY_LAYER", PropServerOffset(TimeCurrent()), UiScale / 100.0);
       g_layer.Currency(g_acct.dispCur);
      }
-   if(g_dashOn && !g_dash.Init("ASSAY_PANEL", true)) { Print("Assay: dashboard could not start"); g_dashOn = false; }
+   if(g_dashOn && !g_dash.Init("ASSAY_PANEL", true, UiScale / 100.0)) { Print("Assay: dashboard could not start"); g_dashOn = false; }
    JInit(JournalMode, JournalTag);
    VetoParse();
    DxyTry(true);
@@ -1300,7 +1394,7 @@ void OnTick()
       else Why(k, "skipped: slot busy or book full");
       if(JOn()) JSignal(S[k], k, b, d, lvl, atr);
       LaySig(b, lvl, d, S[k].mr, g_why[k]);
-      AddSig(S[k], b, d, lvl, atr);              // every signal feeds future calibration
+      AddSig(S[k], b, d, lvl, atr, B(hX[TI(S[k].tf)], 1));   // every signal feeds future calibration
    }
    //  These two ran inside the old text panel, and the first one is not a
    //  reader: it raises the stored equity peak, which sets the risk throttle.
