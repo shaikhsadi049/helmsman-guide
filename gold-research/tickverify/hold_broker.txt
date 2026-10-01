@@ -1,0 +1,48 @@
+broker ticks 139431458
+
+### broker: (C) STOP AUDIT (finding-72 exits, trend trades, Jan move excluded)
+slot  trades  losers  full_stop_pct  avg_loss  winners_1R  win_MAE_gt_0_5R_pct  win_MAE_gt_0_7R_pct  losers_never_up_0_3R_pct  stop_usd_median
+  S1      59      20             90     -0.95          22                   41                   14                        45             73.4
+  S2     123      61             26     -0.62          53                   15                    6                        52             40.6
+  S3     180      67             97     -1.02          67                   30                   15                        52             24.0
+  S4     112      59             17     -0.53          28                   14                    4                        53             57.4
+  S5     151      81             68     -0.86          64                   44                   14                        41             20.7
+  S6     176      75             72     -0.88          45                   31                   13                        53             22.7
+  S7     281     120             88     -1.01          55                   40                   22                        54             15.4
+
+### broker: (A) higher-TF trend flips against the trade while open profit < th -> exit
+                              rule     R   DD  mpos  worst   sh
+           hold (finding-72 exits) 301.4 20.9 15/19   -5.8 0.96
+   H4 EMA20xEMA50 flip & open<0.0R 299.7 20.9 15/19   -5.8 0.96
+   H4 EMA20xEMA50 flip & open<0.5R 299.7 20.9 15/19   -5.8 0.96
+   H4 EMA20xEMA50 flip & open<1.0R 299.7 20.9 15/19   -5.8 0.96
+    H4 EMA20xEMA50 flip & open<any 299.7 20.9 15/19   -5.8 0.96
+H4 close vs EMA50 flip & open<0.0R 298.9 18.8 15/19   -5.6 0.97
+H4 close vs EMA50 flip & open<0.5R 298.9 18.8 15/19   -5.6 0.97
+H4 close vs EMA50 flip & open<1.0R 298.9 18.8 15/19   -5.6 0.97
+ H4 close vs EMA50 flip & open<any 298.9 18.8 15/19   -5.6 0.97
+   D1 EMA20xEMA50 flip & open<0.0R 301.9 20.9 15/19   -5.3 0.97
+   D1 EMA20xEMA50 flip & open<0.5R 301.9 20.9 15/19   -5.3 0.97
+   D1 EMA20xEMA50 flip & open<1.0R 301.9 20.9 15/19   -5.3 0.97
+    D1 EMA20xEMA50 flip & open<any 301.9 20.9 15/19   -5.3 0.97
+D1 close vs EMA50 flip & open<0.0R 301.4 20.9 15/19   -5.8 0.96
+D1 close vs EMA50 flip & open<0.5R 301.4 20.9 15/19   -5.8 0.96
+D1 close vs EMA50 flip & open<1.0R 301.4 20.9 15/19   -5.8 0.96
+ D1 close vs EMA50 flip & open<any 301.4 20.9 15/19   -5.8 0.96
+
+### broker: (B) a runner (peak>=3R, closed giving back) closes -> other same-direction trades with open profit < th close too  | runner events: 19
+                         rule     R   DD  mpos  worst   sh
+                         hold 301.4 20.9 15/19   -5.8 0.96
+close others with open < 0.0R 297.0 20.9 15/19   -4.8 0.99
+close others with open < 0.5R 297.7 20.9 15/19   -4.8 0.98
+close others with open < 1.0R 297.5 20.9 15/19   -4.8 0.98
+
+per strategy, best A rule ('H4', 'c50', 0.0)
+slot  hold  hold_sh    A  A_sh  B05  B05_sh
+  S1  27.2     0.70 25.5  0.68 28.8    0.73
+  S2  38.5     0.88 38.5  0.88 40.1    0.87
+  S3  64.2     0.87 63.4  0.88 64.3    0.86
+  S4  33.9     0.79 33.9  0.79 31.8    0.78
+  S5  71.2     0.88 71.2  0.88 67.7    0.86
+  S6  27.2     0.94 27.2  0.94 26.8    0.94
+  S7  39.3     0.86 39.3  0.86 38.3    0.85

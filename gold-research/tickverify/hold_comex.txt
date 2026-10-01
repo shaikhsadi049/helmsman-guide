@@ -1,0 +1,48 @@
+comex ticks 44923371
+
+### comex: (C) STOP AUDIT (finding-72 exits, trend trades, Jan move excluded)
+slot  trades  losers  full_stop_pct  avg_loss  winners_1R  win_MAE_gt_0_5R_pct  win_MAE_gt_0_7R_pct  losers_never_up_0_3R_pct  stop_usd_median
+  S1      55      20             75     -0.84          16                   44                   19                        35             76.2
+  S2     114      62             19     -0.54          47                   19                   11                        39             46.3
+  S3     178      67             99     -1.00          69                   26                   17                        55             25.2
+  S4     111      59              8     -0.44          20                   15                    5                        47             66.8
+  S5     143      73             67     -0.83          59                   42                   20                        36             21.5
+  S6     176      71             75     -0.87          52                   29                   19                        49             23.4
+  S7     281     134             86     -0.97          54                   37                   17                        49             15.7
+
+### comex: (A) higher-TF trend flips against the trade while open profit < th -> exit
+                              rule     R   DD  mpos  worst  sh
+           hold (finding-72 exits) 292.4 15.3 17/19   -7.7 1.1
+   H4 EMA20xEMA50 flip & open<0.0R 290.4 17.3 17/19   -7.8 1.1
+   H4 EMA20xEMA50 flip & open<0.5R 290.4 17.3 17/19   -7.8 1.1
+   H4 EMA20xEMA50 flip & open<1.0R 290.4 17.3 17/19   -7.8 1.1
+    H4 EMA20xEMA50 flip & open<any 290.4 17.3 17/19   -7.8 1.1
+H4 close vs EMA50 flip & open<0.0R 285.0 16.4 17/19   -7.6 1.1
+H4 close vs EMA50 flip & open<0.5R 285.0 16.4 17/19   -7.6 1.1
+H4 close vs EMA50 flip & open<1.0R 285.0 16.4 17/19   -7.6 1.1
+ H4 close vs EMA50 flip & open<any 285.0 16.4 17/19   -7.6 1.1
+   D1 EMA20xEMA50 flip & open<0.0R 292.9 15.3 17/19   -7.6 1.1
+   D1 EMA20xEMA50 flip & open<0.5R 292.9 15.3 17/19   -7.6 1.1
+   D1 EMA20xEMA50 flip & open<1.0R 292.9 15.3 17/19   -7.6 1.1
+    D1 EMA20xEMA50 flip & open<any 292.9 15.3 17/19   -7.6 1.1
+D1 close vs EMA50 flip & open<0.0R 292.4 15.3 17/19   -7.7 1.1
+D1 close vs EMA50 flip & open<0.5R 292.4 15.3 17/19   -7.7 1.1
+D1 close vs EMA50 flip & open<1.0R 292.4 15.3 17/19   -7.7 1.1
+ D1 close vs EMA50 flip & open<any 292.4 15.3 17/19   -7.7 1.1
+
+### comex: (B) a runner (peak>=3R, closed giving back) closes -> other same-direction trades with open profit < th close too  | runner events: 19
+                         rule     R   DD  mpos  worst   sh
+                         hold 292.4 15.3 17/19   -7.7 1.10
+close others with open < 0.0R 292.9 15.3 16/19   -7.7 1.07
+close others with open < 0.5R 296.3 15.3 16/19   -7.7 1.08
+close others with open < 1.0R 295.2 15.3 16/19   -7.7 1.07
+
+per strategy, best A rule ('H4', 'x', 0.0)
+slot  hold  hold_sh    A  A_sh  B05  B05_sh
+  S1  21.6     0.73 19.5  0.64 24.3    0.81
+  S2  38.0     0.89 38.0  0.89 39.1    0.90
+  S3  70.5     1.01 70.5  1.01 69.1    0.90
+  S4  28.6     0.81 28.6  0.81 30.0    0.84
+  S5  75.6     1.00 75.6  1.00 76.3    1.01
+  S6  30.2     1.14 30.2  1.14 29.4    1.04
+  S7  28.0     0.82 28.0  0.82 28.0    0.82
