@@ -33,7 +33,7 @@ FR = pd.concat(FR, ignore_index=True)
 # reuse the broker overlay/contagion code paths
 CS = open("../dk/of/contagion.py").read(); OS = open("../dk/of/overlay.py").read()
 exec(CS[CS.index("def px_at"):CS.index("D0, TEND = lab.D0")])
-m1 = R2.m1.copy(); m1["close"] = m1.close + G_.ADJ
+m1 = R2.m1.copy()   # already back-adjusted
 exec(OS[OS.index("def bars(rule)"):OS.index("D0, TEND = lab.D0")].replace("COST = 0.07", "COST = G_.COST_RT"))
 exec(CS[CS.index("def px_at"):CS.index("def run(")])
 src_run = CS[CS.index("def run("):CS.index("D0, TEND = lab.D0")].replace("- 0.07)", "- COST)").replace("-0.07 /", "-COST /")
