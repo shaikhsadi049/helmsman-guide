@@ -1,0 +1,110 @@
+{
+ "slot": "S1",
+ "baseline": {
+  "n": 46,
+  "win": 80.4,
+  "PF": 3.93,
+  "sumR": 26.6,
+  "avgR": 0.577,
+  "maxDD_R": 1.1,
+  "ret_dd": 23.87,
+  "top5days_pct": 83.0,
+  "months_pos": "14/19",
+  "q_pos": "6/7",
+  "weeks_pos_pct": 80.0,
+  "eq_R2": 0.893,
+  "ulcer_R": 0.57
+ },
+ "recommended": {
+  "n": 38,
+  "win": 71.1,
+  "PF": 5.26,
+  "sumR": 35.1,
+  "avgR": 0.923,
+  "maxDD_R": 1.2,
+  "ret_dd": 28.24,
+  "top5days_pct": 89.0,
+  "months_pos": "15/19",
+  "q_pos": "6/7",
+  "weeks_pos_pct": 73.0,
+  "eq_R2": 0.893,
+  "ulcer_R": 0.58
+ },
+ "recommended_spec": {
+  "exit": {
+   "type": "split position, 2 equal halves, same k70 stop (same total risk 1R)",
+   "half_A": {
+    "kind": "trend",
+    "sq": "k70",
+    "tp": "none",
+    "part": "slot",
+    "be": "none",
+    "trail": "h4q80",
+    "rat": "none",
+    "ts": "none",
+    "policy_index": 1200,
+    "note": "= today's Assay exit: lock +0.25R once measured TP1 (f30/k) reached, H4 measured trail"
+   },
+   "half_B": {
+    "kind": "trend",
+    "sq": "k70",
+    "tp": "none",
+    "part": "none",
+    "be": "be1",
+    "trail": "h4q80",
+    "rat": "none",
+    "ts": "none",
+    "policy_index": 1320,
+    "note": "free runner: no TP1 lock, stop to +0.05R after +1R, H4 h4q80 trail"
+   },
+   "causal_alternative": "monthly online chooser among {1200,1248,1254,1320,1324,50/50 1200+1320,50/50 1248+1320} by past per-signal Sharpe (mean/std of R of resolved signals): 35.1R, maxDD 1.5R, 14/19 months, eq_R2 0.882 (picked the 50/50 blend in 243/329 signals)"
+  },
+  "entry_filter": "none. Keep all signals (one position at a time). Every causal filter tested (S1 LGBM, pooled trend-slot LGBM, online feature-threshold rules, causal-percentile regime vetoes) reduced sumR and did not reduce maxDD.",
+  "inputs_needed_live": [
+   "M30 ATR (slot TF)",
+   "k70 = 0.7 quantile of recent MAE (already in Assay)",
+   "f30 measured TP1 (already in Assay)",
+   "H4 closes + tw80 measured H4 pullback depth (already in Assay)",
+   "+1R breakeven trigger for half B",
+   "two tickets (or one ticket with partial close logic) per signal"
+  ]
+ },
+ "in_sample_best": {
+  "single_policy": {
+   "policy_index": 1248,
+   "policy": "k70/none/slot/be1/h4q50/none/none",
+   "metrics": {
+    "n": 48,
+    "win": 83.3,
+    "PF": 4.56,
+    "sumR": 28.6,
+    "avgR": 0.596,
+    "maxDD_R": 1.1,
+    "ret_dd": 25.84,
+    "top5days_pct": 80.0,
+    "months_pos": "14/19",
+    "q_pos": "6/7",
+    "weeks_pos_pct": 80.0,
+    "eq_R2": 0.891,
+    "ulcer_R": 0.53
+   }
+  },
+  "note": "best single fixed policy by sumR/maxDD (in-sample). Max-sumR policy (k50, no lock, be1, h4q50, ts_half; idx 129) makes 78.3R but maxDD 6.2R, 11/19 months, top5days 101% - rejected as not smooth. Best 50/50 blend in-sample = the recommended one (ret_dd 28.2)."
+ },
+ "key_findings": [
+  "The TP1 lock at +0.25R is what makes S1 smooth: every k70/k90 'slot'-lock variant has maxDD 1.1R and 14-17/19 positive months; removing it (k70, be1) raises sumR 26.6->43.9R but maxDD 1.1->2.0R and top5days 83%->92%.",
+  "Stop quantile k70 is the sweet spot: k50 lock variants have maxDD 4-5R and 10-13/19 months; k90 is smoother (16-17/19 months) but only 16-20R.",
+  "Splitting the position 50/50 (today's lock exit + a be1 free runner) gives 35.1R vs 26.6R (+32%) with maxDD 1.2R, ret/DD 28.2 vs 23.9, 15/19 months, same eq_R2 0.893; causal Sharpe chooser lands on the same blend (35.1R, DD 1.5R).",
+  "H4 trail depth (h4q80 vs h4q50 vs none), ratchets and time stop matter little; ATR chandelier trails (atr2/atr4) are clearly worse (7-24R, 9-12/19 months).",
+  "Entry: per-signal R is lower when the higher-TF trend is already stretched (d1_ret24, h4_z20, h1_adx, dist_prev_hi; Spearman -0.22..-0.30, same sign 5-7/7 quarters), but no filter helps the one-position book: the greedy slot already takes mainly the first signal of each pullback cluster (taken avg 0.58R vs 0.37R for the 283 blocked signals). Online ML IC ~0 (S1-only 0.02, pooled -0.05).",
+  "Losing/flat months (2025-05, 2025-10, 2026-02/03, 2026-07) are late/climactic trend phases (D1 ADX 36.6 vs 24.7 in good months, D1 ret48 7.3 vs 4.8 ATR) and the 2026 switch from longs to shorts; they cost only -0.8..-1.0R each; vetoes on d1_adx/d1_ret48/d1_atr_rank remove more good than bad trades."
+ ],
+ "robustness_notes": [
+  "Blend neighbourhood: lock half in {1200,1208,1240,1248} x runner half be1 with h4q80 or no trail (1320/1352) at weights 0.3-0.7: 30-39R, maxDD 1.1-1.7R, ret/DD 21-28; runner with h4q50 trail or without be1 has DD 1.8-3.6R - keep be1 on the runner.",
+  "Gain is concentrated in strong trend months (2025-08, 2025-12, 2026-01 = +8.6R of the +8.5R); excluding Jan-2026 the blend still beats baseline 18.9R vs 16.0R. Month-by-month the blend is >= baseline in only 11/19 months; weeks positive 73% vs 80% (fewer tiny locked wins).",
+  "Only 329 S1 signals 2025+ and 38-48 taken trades; 9 losses in baseline. Every effect is statistically fragile; the recommendation is structural (fixed 50/50, no fitted threshold) to limit over-fit.",
+  "Causal regime-conditioned exit choice (online_best_policy with 14 regime features) did not beat the unconditioned choice consistently (36-48R, DD 2.0-2.7R).",
+  "Not tested in protocol scope: allowing a 2nd concurrent S1 position (blocked signals average +0.37R per signal under baseline exit) - would add correlated risk in the same trend."
+ ],
+ "verdict": "improves"
+}

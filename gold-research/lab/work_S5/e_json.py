@@ -1,0 +1,28 @@
+import json, sys; sys.path.insert(0,'..'); import lab
+M=json.load(open('final_metrics.json'))
+J={"slot":"S5",
+ "baseline":M['baseline_8'],
+ "recommended":M['baseline_8'],
+ "recommended_spec":{"exit":lab.P[8],
+   "entry_filter":"none (take every S5 signal; one position at a time)",
+   "inputs_needed_live":["S5 signal (M5 EMA30 dip-and-reclaim with M5/M15/H1 6-EMA stacks, H4+D1 EMA20>EMA50, UTC 7-20)","k50 measured stop","f50 measured TP1","h4q50 H4 trail quantile"],
+   "optional_smoothness_variant_IN_SAMPLE":{"exit":lab.P[972],"metrics":M['IS_972'],
+      "note":"adds 3R cap on the runner + q70k50 profit ratchet; chosen on 2025+ data, not reproduced by any causal selector; ranked 1567/3600 on 2024H2 warm-up"}},
+ "in_sample_best":M['IS_972'],
+ "causal_counterparts":{"online_mean_choice_8_vs_972":M['causal_8vs972'],
+   "shadow_book_480_policies_sum":{"sumR":66.5,"maxDD_R":8.8,"months_pos":"10/19","eq_R2":0.897,"top5days_pct":109},
+   "online_best_policy_12cands_global":{"sumR":56.6,"maxDD_R":11.4,"months_pos":"14/19","eq_R2":0.793},
+   "best_online_ML_filter_pooled_ext_cls0.4":{"n":110,"sumR":56.6,"maxDD_R":3.1,"months_pos":"17/19","eq_R2":0.957,"ret_dd":18.15}},
+ "key_findings":[
+  "Baseline is already strong and smooth for its trade count: 74 trades, +54.0R, maxDD 3.1R, 15/19 months, worst month -1.6R; but profit is concentrated (top-5 days = 76% of R; Jan-2026 alone +16.8R).",
+  "Stop: k50 dominates k70/k90 (median sumR over all exits 36.9 vs 29.6/28.1R). Trail type among h4q50/h4q80/none barely matters once a target or ratchet exists; continuous ATR chandeliers are bad (atr2 median -4.7R).",
+  "In-sample best smooth exit = k50 + 3R cap + slot partial + h4q50 + q70k50 ratchet (policy 972): +60.1R, 131 trades, 16/19 months, eq_R2 0.982, top-5 days 32%; beats baseline in 5/7 quarters but loses the two big-trend quarters (2025Q1, 2026Q1). Neighbourhood is robust (12 sq/be/ts variants: 16-17/19 months, top5 25-34%).",
+  "That improvement is NOT causally reproducible: on 2024H2 warm-up 972 made +0.7R (rank 1567/3600) vs baseline +7.7R; causal shadow-book / online_best_policy selectors with or without regime buckets all gave worse smoothness than baseline (maxDD 6-11R, 10-15/19 months). The only causal mix close to baseline (online pick between 8 and 972) used a hindsight candidate set: 58.5R, maxDD 3.3, 15/19, eq_R2 0.962.",
+  "Entry: univariate effects show a consistent 'over-extended trend is worse' pattern (d1_ret3 IC -0.18, h4_di -0.16, h4_adx -0.15, h1_ribbon -0.14, 5/6 quarters same sign), but every causal filter (online quintile rules on 170 features, LightGBM on S5 alone or pooled with 6 trend slots, regression/classification) failed to improve trade-level results: only 6-10% of single-feature rules beat baseline ret_dd (noise level), best ML filter 56.6R/18.15 ret_dd vs 60.1/18.25 unfiltered. Skipping a clustered signal mostly just shifts entry to the next signal of the same episode.",
+  "Losing/flat months (2025-07, 2025-12, 2026-02..04, 2026-07) are low-volatility, low-efficiency H4 regimes (taken trades: h4_atr_rank 0.25 vs 0.60, h4_er30 0.20 vs 0.28, h4_ribbon 0.69 vs 1.12) and the 2026-03 trend flip long->short; all losses are small (<=1.6R/month) and the signal-level effect of these features has the opposite sign, so no causal rule exploits it."],
+ "robustness_notes":[
+  "Greedy one-position rule makes results path-dependent; effective sample is ~75-130 trades over 19 months.",
+  "Long-only vs short split (shorts -1.1R baseline) reflects the 2025 gold bull; shorts were positive under the ratchet exit in 2026Q2 (+6.4R) - do not add a direction filter.",
+  "Per-signal mean R favours long-holding exits (no partial: mean 1.33R/signal) but they produce maxDD 11R and 95% top-5-day concentration at trade level; selection by per-signal mean is the wrong objective for smoothness."],
+ "verdict":"no robust improvement"}
+json.dump(J,open('../reports/S5.json','w'),indent=1); print('ok')

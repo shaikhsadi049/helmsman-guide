@@ -1,0 +1,96 @@
+{
+ "slot": "F9",
+ "baseline": {
+  "n": 89,
+  "win": 59.6,
+  "PF": 1.45,
+  "sumR": 12.8,
+  "avgR": 0.144,
+  "maxDD_R": 5.5,
+  "ret_dd": 2.35,
+  "top5days_pct": 57.0,
+  "months_pos": "14/18",
+  "q_pos": "6/7",
+  "weeks_pos_pct": 73.0,
+  "eq_R2": 0.942,
+  "ulcer_R": 1.45
+ },
+ "recommended": {
+  "n": 76,
+  "win": 65.8,
+  "PF": 1.7,
+  "sumR": 15.1,
+  "avgR": 0.198,
+  "maxDD_R": 3.5,
+  "ret_dd": 4.29,
+  "top5days_pct": 51.0,
+  "months_pos": "13/18",
+  "q_pos": "6/7",
+  "weeks_pos_pct": 75.0,
+  "eq_R2": 0.948,
+  "ulcer_R": 1.18
+ },
+ "recommended_spec": {
+  "exit": {
+   "type": "adaptive shadow-book",
+   "rule": "lab.online_best_policy(rows=F9 signals incl. 2024-06+ warm-up, cands=all 180 fade policies 3600..3779, known=lab.known_bar(rows,cands), regime=None): at each month start pick the fade exit policy with the highest mean net R over F9 signals whose outcomes are already resolved; apply it to every F9 signal of that month",
+   "chosen_in_practice": "2025-01..2026-04: k90 stop, target f70 or 1R, (q70k50 ratchet), horizon x2 (1440 min); 2026-05..07: k70, f70, be1, horizon x2",
+   "fixed_fallback_if_shadow_book_not_built": {
+    "sq": "k70",
+    "tp": "f70",
+    "be": "be1",
+    "rat": "none",
+    "hm": 2.0,
+    "note": "in-sample selected, see in_sample_best"
+   }
+  },
+  "entry_filter": "none (take every F9 signal). No causal take/skip rule or online ML beat 'take all' robustly.",
+  "inputs_needed_live": [
+   "H1 close, 20-bar SMA/SD (signal)",
+   "H4 6-EMA stack (signal gate)",
+   "H1 ATR, k50/k70/k90 stop quantiles and f30/f50/f70 favourable-move quantiles (already in Assay)",
+   "shadow book: simulated R of all 180 fade exit variants per past F9 signal (1m price path), monthly argmax"
+  ]
+ },
+ "in_sample_best": {
+  "n": 85,
+  "win": 64.7,
+  "PF": 1.76,
+  "sumR": 22.3,
+  "avgR": 0.262,
+  "maxDD_R": 3.5,
+  "ret_dd": 6.33,
+  "top5days_pct": 45.0,
+  "months_pos": "14/18",
+  "q_pos": "6/7",
+  "weeks_pos_pct": 73.0,
+  "eq_R2": 0.964,
+  "ulcer_R": 1.28
+ },
+ "in_sample_best_spec": {
+  "exit": {
+   "sq": "k70",
+   "tp": "f70",
+   "be": "be1",
+   "rat": "q70k50",
+   "hm": 2.0
+  },
+  "entry": "take all; with in-sample filter d1_stack>=0 (exit k70/f70/be1/hm2): {\"n\": 49, \"win\": 75.5, \"PF\": 3.21, \"sumR\": 25.0, \"avgR\": 0.51, \"maxDD_R\": 2.0, \"ret_dd\": 12.38, \"top5days_pct\": 40.0, \"months_pos\": \"14/17\", \"q_pos\": \"7/7\", \"weeks_pos_pct\": 79.0, \"eq_R2\": 0.959, \"ulcer_R\": 0.69}"
+ },
+ "key_findings": [
+  "Baseline 2025+: 89 trades, PF 1.45, +12.8R, maxDD 5.5R, 14/18 months; all-signal mean +0.146R/signal. July 2026 alone is -3.8R (11 trades, 27% win).",
+  "Exit horizon is the strongest exit lever: hm=2 (1440 min) averages +0.160R/signal vs +0.123 (hm1) and +0.067 (hm0.5) across the 60 policies of each horizon; k50 stop is worst (+0.061 vs +0.153 k70 / +0.136 k90). be/ratchet are near-irrelevant.",
+  "Best fixed exit k70/f70/be1/hm2 (IN-SAMPLE): +22.1-22.3R, PF 1.76, DD 3.5R. Paired gain vs baseline +0.100R/signal (t=1.9), positive in 6/7 quarters; same exit also helps sibling slots F11 (+0.101, t=2.0) and F10 (+0.043), ~neutral on F8 (+0.017).",
+  "Causal shadow-book exit (online_best_policy over all 180 fade policies, F9 history): +15.1R, PF 1.70, maxDD 3.5R (vs 5.5), ulcer 1.18 (vs 1.45), eq_R2 0.948 (vs 0.942), 13/18 months, 76 trades. Regime-conditioned exit choices (ATR rank, ADX, ER, day range) gave 8.7-22.5R scattered with no consistent winner -> noise, not used.",
+  "Entry: strongest in-sample F9 effects are mechanistic (H1 BB-width rank low = fading a squeeze breakout: bottom quartile -0.29R vs +0.62R top; shallow stretch h1_dist20 top quartile -0.27R; d1_stack against the trade -0.11R vs +0.53R). None survives causal learning: online bin rules 2.5-13R, online LightGBM (F9-only or pooled F8-F11 with slot one-hot, all features) 8-16.5R with no consistent gain over 15.1R.",
+  "Why d1_stack fails causally: in the cumulative history the counter-daily-trend fades (d1_stack=-1) were the BEST group at every month start through July 2026 (+0.11..+0.17R vs -0.32..+0.13R for with-trend); the 2025+ reversal of the effect is only visible in hindsight. Losing months (2025-01/02/04, 2026-03/07) had more buys (66% vs 53%), counter-daily-trend entries (d1_stack -0.09 vs +0.03) and lower H4 ATR rank (0.34 vs 0.51)."
+ ],
+ "robustness_notes": [
+  "Only 158 F9 signals in 2025+ (~85 traded); a +2.3R causal gain is within ~1 sigma of noise; the drawdown/ulcer reduction (3.5 vs 5.5R) is the more meaningful part.",
+  "Neighbourhood of the fixed exit: every k70 hm2 variant (f50/f70/1R/mean, with or without be1/ratchet) beats baseline (15.3-22.3R); k90 hm2 with 1R/f70 gives 14-16R with DD 2.3-2.7R. Horizon x2 is the common factor.",
+  "Warm-up (2024-06..12) F9 mean R was negative (-0.10R), so any causal learner that compares to zero starts by skipping too much; this is why absolute 'skip if predicted <0' rules lose trades and R.",
+  "In-sample d1_stack>=0 filter (+25.0R, PF 3.21, DD 2.0R, 7/7 quarters) is the tempting over-fit: it is not learnable causally (cumulative or 180/270-day windows: 6-17R); only a 90-day window on F9 with base exit gave 14.9R/DD 2.0, but its neighbours fail. Recommend logging it as a monitored hypothesis, not a rule.",
+  "Pooling the shadow book with sibling fade slots (F8-F11) gave 14.9R but DD 7.5R: pooled exit choice is dominated by F8 (15m) and is worse for F9; keep F9's own history."
+ ],
+ "verdict": "improves"
+}

@@ -1,0 +1,93 @@
+{
+ "slot": "F11",
+ "baseline": {
+  "n": 70,
+  "win": 64.3,
+  "PF": 1.28,
+  "sumR": 5.6,
+  "avgR": 0.08,
+  "maxDD_R": 3.9,
+  "ret_dd": 1.44,
+  "top5days_pct": 111.0,
+  "months_pos": "12/17",
+  "q_pos": "4/7",
+  "weeks_pos_pct": 61.0,
+  "eq_R2": 0.892,
+  "ulcer_R": 1.62
+ },
+ "recommended": {
+  "n": 70,
+  "win": 64.3,
+  "PF": 1.28,
+  "sumR": 5.6,
+  "avgR": 0.08,
+  "maxDD_R": 3.9,
+  "ret_dd": 1.44,
+  "top5days_pct": 111.0,
+  "months_pos": "12/17",
+  "q_pos": "4/7",
+  "weeks_pos_pct": 61.0,
+  "eq_R2": 0.892,
+  "ulcer_R": 1.62
+ },
+ "recommended_spec": {
+  "exit": {
+   "policy": {
+    "kind": "fade",
+    "sq": "k70",
+    "tp": "f50",
+    "be": "none",
+    "rat": "none",
+    "hm": 1.0
+   },
+   "plain": "keep baseline: stop k70 (min 0.3), whole position at f50, time exit 720 min"
+  },
+  "entry_filter": "none adopted. Shadow-test candidate: skip when h4_er30 < past 25th percentile of F11 signals, switched on only while past resolved F11 signals in that tail have negative shrunk mean R (gate was on in all 17 months).",
+  "inputs_needed_live": [
+   "H4 efficiency ratio over 30 bars (for the shadow candidate)",
+   "k70, f50 (existing)"
+  ]
+ },
+ "in_sample_best": {
+  "n": 76,
+  "win": 73.7,
+  "PF": 1.5,
+  "sumR": 8.1,
+  "avgR": 0.107,
+  "maxDD_R": 3.0,
+  "ret_dd": 2.71,
+  "top5days_pct": 80.0,
+  "months_pos": "12/17",
+  "q_pos": "5/7",
+  "weeks_pos_pct": 64.0,
+  "eq_R2": 0.905,
+  "ulcer_R": 1.25,
+  "policy": "k70/f30/none/none/hm1.0 (IN-SAMPLE; highest sumR fixed = k50/f70/be1/hm2 18.7R but DD 5.4, R2 0.74)"
+ },
+ "candidate_h4er30_gate": {
+  "n": 60,
+  "PF": 1.73,
+  "sumR": 10.5,
+  "maxDD_R": 3.4,
+  "months_pos": "13/17",
+  "q_pos": "5/7",
+  "eq_R2": 0.935,
+  "ulcer_R": 1.39,
+  "top5days_pct": 59.0,
+  "label": "feature chosen in-sample (2nd best of 336 gated rules); threshold and activation causal"
+ },
+ "key_findings": [
+  "Baseline is weak and lumpy: PF 1.28, +5.6R, top-5 days 111% of profit, 4/7 quarters positive; 2025Q1 (-1.4R) and 2026Q3 (-2.0R) negative.",
+  "Exits: f30 target is the most robust cell family (positive in all 9 stop x horizon cells, +4.5..+14.2R, PF 1.4-1.7); k70/f30/h1 IN-SAMPLE = +8.1R, PF 1.50, DD 3.0. Longer horizon (hm2 = 1440 min) helps on average (+9.2R vs +5.1R at hm1). be1/ratchet are near no-ops.",
+  "But the causal learner does not find a better exit: online target selection at k70/h1 keeps f50 (104/111 signals) -> +4.7R; with regime buckets results scatter +1.5..+17.4R (median ~6-11R depending on set) - no stable regime-dependent exit.",
+  "Entry: strongest univariate effects are daily-timeframe (d1_streak, d1_rsi2, d1_z20; |IC| 0.27-0.32) but inconsistent (2-4/7 quarters). Online ML: every one of 16 configs is below baseline (-0.3..+5.2R). Online threshold rules: -1.1..+8.6R.",
+  "h4_er30 low (choppy H4) is bad for F11 (tercile means -0.25/+0.18/+0.34R, IC +0.31) and also for F10 and F9 in 2025+; a causally gated skip of the bottom quartile gives +10.5R PF 1.73 DD 3.4 top5 59% and is robust to the cut (q20/25/33/40: +9.6/10.5/11.7/10.1R). But it is the 2nd best of 336 equally-gated single-feature rules (median +5.6R, 95th pct +7.5R), so selection bias cannot be excluded.",
+  "Losing months (2025-01/02/04, 2026-03/07; -8.2R over 22 trades) have low daily volatility rank (d1_atr_rank -1.1 SD) and low D1/H4 variance ratio - quiet, directionless markets where a false breakout has nowhere to revert to - but volatility gates did not help causally (+2.5..+6.4R)."
+ ],
+ "robustness_notes": [
+  "~111 signals 2025+ (70 taken): one extra 2R winner moves sumR by a third; treat all F11 differences under ~5R as noise.",
+  "Multiple-testing check: gated rule scan over all 169 features x 2 tails -> sumR median 5.6, 5-95% 2.0..7.5R; only 2 rules >= 10.5R.",
+  "No exit or entry change passed both the causal test and the neighbourhood/selection test, so the baseline stays."
+ ],
+ "verdict": "no robust improvement"
+}

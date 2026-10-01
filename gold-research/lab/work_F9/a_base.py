@@ -1,0 +1,10 @@
+import sys; sys.path.insert(0, "/tmp/claude-0/-home-user-helmsman-guide/88707adc-3931-58c8-a73e-34371631e4fa/scratchpad/lab"); import lab, numpy as np, pandas as pd
+S=lab.SIG; print(S.groupby('slot').size()); print(S[S.slot=='F9'].head(3).T)
+m,rr,R=lab.evaluate('F9'); print(m)
+t=lab.TIME[rr].tz_localize(None)
+df=pd.DataFrame({'R':R},index=t)
+mon=df.R.groupby(t.to_period('M')).agg(['count','sum',lambda x:(x>0).mean()]); print(mon.round(2))
+print(df.R.groupby(t.to_period('Q')).agg(['count','sum']).round(2))
+rows=np.where((S.slot=='F9'))[0]; print('all F9',len(rows),'2025+',(lab.TIME[rows]>=lab.D0).sum())
+print(S[S.slot.str.startswith('F')].groupby('slot').time.agg(['min','max','count']))
+print(pd.Series(lab.baseline_policy('F9')), lab.P[lab.baseline_policy('F9')])

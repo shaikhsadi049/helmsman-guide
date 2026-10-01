@@ -1,0 +1,87 @@
+{
+ "slot": "F10",
+ "baseline": {
+  "n": 79,
+  "win": 62.0,
+  "PF": 1.43,
+  "sumR": 10.3,
+  "avgR": 0.131,
+  "maxDD_R": 3.2,
+  "ret_dd": 3.2,
+  "top5days_pct": 71.0,
+  "months_pos": "12/18",
+  "q_pos": "6/7",
+  "weeks_pos_pct": 62.0,
+  "eq_R2": 0.852,
+  "ulcer_R": 1.47
+ },
+ "recommended": {
+  "n": 79,
+  "win": 62.0,
+  "PF": 1.67,
+  "sumR": 16.2,
+  "avgR": 0.206,
+  "maxDD_R": 2.7,
+  "ret_dd": 5.98,
+  "top5days_pct": 49.0,
+  "months_pos": "13/18",
+  "q_pos": "6/7",
+  "weeks_pos_pct": 70.0,
+  "eq_R2": 0.931,
+  "ulcer_R": 1.2
+ },
+ "recommended_spec": {
+  "exit": {
+   "rule": "causal target selection: each month pick, among k70-stop / 1x-horizon fade exits with targets {f30,f50,f70,1R,mean}, the one with best mean R on past resolved F10 signals (lab.online_best_policy, prior 20). It selected 'mean' in every month 2025-01..2026-07, so in practice:",
+   "policy": {
+    "kind": "fade",
+    "sq": "k70",
+    "tp": "mean",
+    "be": "none",
+    "rat": "none",
+    "hm": 1.0
+   },
+   "plain": "stop = k70 x ATR (min 0.3), take whole position when price returns to the 20-bar mean (M30), time exit 480 min"
+  },
+  "entry_filter": "none (no causal filter beat the no-filter result robustly)",
+  "inputs_needed_live": [
+   "M30 20-bar SMA (target)",
+   "k70 MAE quantile (existing)",
+   "M30 ATR",
+   "shadow book of 5 target variants on past F10 signals to keep re-checking the choice monthly"
+  ]
+ },
+ "in_sample_best": {
+  "n": 79,
+  "win": 64.6,
+  "PF": 1.99,
+  "sumR": 14.7,
+  "avgR": 0.186,
+  "maxDD_R": 1.7,
+  "ret_dd": 8.66,
+  "top5days_pct": 38.0,
+  "months_pos": "15/18",
+  "q_pos": "6/7",
+  "weeks_pos_pct": 70.0,
+  "eq_R2": 0.942,
+  "ulcer_R": 0.73,
+  "policy": "k70/1R/none/none/hm0.5 (IN-SAMPLE, best ret/DD; highest sumR fixed policy is k50/mean/be1/q70k50/hm2 = 18.5R but maxDD 4.5)"
+ },
+ "key_findings": [
+  "Exit target is the lever: with the k70 stop, every target/horizon except f30 beats the baseline f50 target (k70 row: 1R 14.2-14.9R, mean 13.1-16.2R, vs f50/h1 10.3R).",
+  "Causal online target selection (lab.online_best_policy over 5 targets at k70/h1) picks 'mean' from the first month using only warm-up outcomes and keeps it: 79 trades, PF 1.67, +16.2R, maxDD 2.7R, eq_R2 0.931, top5 days 49% (baseline PF 1.43, +10.3R, DD 3.2, R2 0.852, top5 71%). Same choice with pooled F8-F11 history: +15.6R.",
+  "Stop: k70 dominates (avg over all targets/horizons: PF 1.55, DD 3.0R) vs k50 (PF 1.30, DD 5.7R) and k90 (PF 1.60 but only 6.4R). Breakeven (be1) and the q70k50 ratchet are near no-ops (identical R on most signals).",
+  "Shorter horizon (hm0.5 = 240 min) with 1R target is the smoothest IN-SAMPLE choice (PF 1.99, DD 1.7R, ulcer 0.73, 15/18 months) but the causal learner does not reliably find it when horizon is a candidate dimension (k70 15-policy set: +9.7R).",
+  "Entry: best features form a coherent 'already bouncing' family (signed m15_ret12/ret24, m5_rsi2, m5/m15 dist20, m5_streak; IC -0.22..-0.29, same sign in 6-7/7 quarters): fades that have already started reverting before entry do worse. Pair m5_rsi2>median & m15_ret12>median: mean R -0.36 vs +0.38, worse in 7/7 quarters (baseline exit). But max |IC| 0.29 is at the permutation-noise level and causal filters add nothing on top of the 'mean' exit (gated pair +15.9R, composite +16.6-16.8R vs +16.2R).",
+  "Online ML (LightGBM, own or pooled F8-F11 with slot indicator, 4 feature subsets, reg/cls): out-of-sample IC -0.10..+0.13; best +16.4R with 60 trades, 15 of 16 configs below +16.2R. Online threshold rules: +3.2..+16.6R. No robust entry filter.",
+  "Losing months (2025-04, 2025-11, 2026-01, 2026-02, 2026-04; -3.5R over 23 trades) are high-volatility expansion months (d1/h4/h1 atr_pct +1.3..+1.4 SD vs good months, lower M5/M15 range-efficiency). Volatility skip-rules cost more winners than losers (gated d1_atr_pct-high skip: +10.4R)."
+ ],
+ "robustness_notes": [
+  "The 'mean' target win does NOT replicate on sibling fades F8/F9 (there f50 is better at k70/h1), so it is F10-specific; it is however what the causal learner chose from F10's own warm-up history and kept every month.",
+  "Neighbourhood: k70/mean at hm 0.5/1/2 = 13.1/16.2/13.8R; k70/1R at hm 0.5/1/2 = 14.7/14.2/14.9R; all above baseline 10.3R with DD <= 3.1R.",
+  "Quarterly (recommended): +3.2, -1.0, +3.5, +2.1, +2.5, +1.7, +4.2R; 2025Q2 (April 2025 volatility spike) remains the only losing quarter, as in baseline.",
+  "Only 111 signals 2025+ (79 taken); a 6R improvement is ~0.07R/trade. Keep the shadow book running: if f50/1R overtakes 'mean' on past resolved signals, the learner switches automatically.",
+  "A filter-plus-exit combination (bounce composite skip + k70/1R/hm0.5) reached +18.4R PF 2.62 DD 1.7 in testing, but both pieces were chosen in-sample; not recommended."
+ ],
+ "verdict": "improves"
+}

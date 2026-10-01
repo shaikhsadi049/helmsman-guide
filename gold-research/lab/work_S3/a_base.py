@@ -1,0 +1,11 @@
+import sys; sys.path.insert(0, ".."); sys.path.insert(0, "."); import lab, numpy as np, pandas as pd
+S=lab.SIG; print(S.slot.value_counts().sort_index()); print(S[S.slot=="S3"].head(3).T)
+print(lab.P[0], lab.P[3600]); print(len(lab.P))
+b=lab.baseline_policy("S3"); print("base", b, lab.P[b])
+m,rr,R=lab.evaluate("S3"); print(m)
+t=lab.TIME[rr]; s=pd.Series(R,index=t.tz_localize(None).to_period("M"))
+print(s.groupby(level=0).agg(['count','sum','mean']).round(2))
+allrows=np.where((S.slot.values=="S3")&(lab.TIME>=lab.D0))[0]; print("all signals 2025+",len(allrows), "pre", (S.slot.values=="S3").sum()-len(allrows))
+Rb=np.asarray(lab.load_R()[allrows,b]); print("all-signal mean R", Rb.mean(), "sum", Rb.sum())
+print(pd.Series(Rb,index=lab.TIME[allrows].tz_localize(None).to_period("Q")).groupby(level=0).agg(['count','mean','sum']).round(2))
+print(S.loc[S.slot=="S3", ["dir"]].value_counts())

@@ -1,0 +1,17 @@
+import sys; sys.path.insert(0, ".."); import lab, numpy as np, pandas as pd
+S=lab.SIG; print(S.slot.value_counts().sort_index().to_dict())
+rows=np.where(S.slot.values=="S2")[0]; print("S2 rows",len(rows), "2025+", (lab.TIME[rows]>=lab.D0).sum(), S.iloc[rows].time.min())
+b=lab.baseline_policy("S2"); print("base pol",b,lab.P[b])
+m,rr,R=lab.evaluate("S2"); print(m)
+t=lab.TIME[rr]
+df=pd.DataFrame({"R":R},index=t.tz_localize(None))
+mon=df.R.groupby(df.index.to_period("M")).agg(["count","sum","mean"]); mon["win%"]=df.R.groupby(df.index.to_period("M")).apply(lambda x:(x>0).mean()*100)
+print(mon.round(2))
+print(df.R.groupby(df.index.to_period("Q")).agg(["count","sum"]).round(1))
+# all-signal mean per month (no greedy)
+r25=rows[lab.TIME[rows]>=lab.D0]; Rall=np.asarray(lab.load_R()[r25,b])
+s=pd.Series(Rall,index=lab.TIME[r25].tz_localize(None)); print("all-signal", len(s), s.mean().round(3), s.groupby(s.index.to_period("M")).agg(["count","mean"]).round(2).T)
+print(S.iloc[rows].dir.value_counts())
+print(pd.Series(R).describe())
+print("by dir", pd.Series(R).groupby(S.dir.values[rr]).agg(["count","sum","mean"]))
+X=np.asarray(lab.load_X()[rr,b]); print("hold hrs median", np.median((X-S.m1.values[rr])/60))
